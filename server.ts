@@ -44,6 +44,7 @@ async function startServer() {
   safeAddCol('kamar', 'updated_at', "TEXT NOT NULL DEFAULT ''");
   safeAddCol('kamar', 'deleted_at', 'TEXT');
   safeAddCol('kamar', 'is_full', 'INTEGER NOT NULL DEFAULT 0');
+  safeAddCol('users', 'is_active', 'INTEGER NOT NULL DEFAULT 1');
   safeAddCol('users', 'deleted_at', 'TEXT');
   safeAddCol('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
   safeAddCol('users', 'scope_asrama', "TEXT NOT NULL DEFAULT 'semua'");

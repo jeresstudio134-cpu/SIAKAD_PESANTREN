@@ -13,6 +13,7 @@ import {
   Calendar
 } from 'lucide-react';
 import type { AuditLog, UserSession } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface AuditLogViewProps {
   currentUser: UserSession | null;
@@ -29,7 +30,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ currentUser }) => {
   const fetchLogs = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/audit-logs?limit=100');
+      const res = await authFetch('/api/audit-logs?limit=100');
       const json = await res.json();
       setLogs(json.data || []);
     } catch (err) {

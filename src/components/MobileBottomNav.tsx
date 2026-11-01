@@ -2,8 +2,8 @@ import React from 'react';
 import { Users, UserCheck, BarChart3, Cloud, Plus, Home } from 'lucide-react';
 
 interface MobileBottomNavProps {
-  activeTab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy';
-  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy') => void;
+  activeTab: 'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy';
+  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy') => void;
   onOpenAddModal: () => void;
 }
 

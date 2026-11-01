@@ -35,6 +35,7 @@ import type {
   TahunAjaran
 } from '../types/index.ts';
 import { compressImage, validateUpload } from '../utils/imageCompressor.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface SantriDetailModalProps {
   santri: Santri;
@@ -129,7 +130,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
     try {
       setLoading(true);
       setErrorForbidden(null);
-      const res = await fetch(`/api/santri/${santri.id}`);
+      const res = await authFetch(`/api/santri/${santri.id}`);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(json.error || 'Akses ditolak: Santri di luar cakupan wewenang');
@@ -148,11 +149,11 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   const fetchKeanggotaanAndDokumen = async () => {
     try {
       const [kRes, dRes, lRes, cRes, taRes] = await Promise.all([
-        fetch(`/api/santri/${santri.id}/keanggotaan`),
-        fetch(`/api/dokumen?pemilikId=${santri.id}&pemilikTipe=santri`),
-        fetch('/api/master/lembaga'),
-        fetch('/api/master/kelas'),
-        fetch('/api/master/tahun-ajaran'),
+        authFetch(`/api/santri/${santri.id}/keanggotaan`),
+        authFetch(`/api/dokumen?pemilikId=${santri.id}&pemilikTipe=santri`),
+        authFetch('/api/master/lembaga'),
+        authFetch('/api/master/kelas'),
+        authFetch('/api/master/tahun-ajaran'),
       ]);
 
       const [kData, dData, lData, cData, taData] = await Promise.all([
@@ -215,14 +216,14 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
       formData.append('file', compressedFile);
       formData.append('category', 'foto_santri');
 
-      const res = await fetch('/api/storage/upload', {
+      const res = await authFetch('/api/storage/upload', {
         method: 'POST',
         body: formData,
       });
       const data = await res.json();
 
       if (data.success && data.key) {
-        await fetch(`/api/santri/${santri.id}`, {
+        await authFetch(`/api/santri/${santri.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -252,7 +253,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
     }
 
     try {
-      const res = await fetch(`/api/santri/${santri.id}/keanggotaan`, {
+      const res = await authFetch(`/api/santri/${santri.id}/keanggotaan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(keanggotaanForm),
@@ -293,14 +294,14 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
       formData.append('file', selectedDocFile);
       formData.append('category', 'dokumen_santri');
 
-      const uploadRes = await fetch('/api/storage/upload', {
+      const uploadRes = await authFetch('/api/storage/upload', {
         method: 'POST',
         body: formData,
       });
       const uploadData = await uploadRes.json();
 
       if (uploadData.success && uploadData.key) {
-        await fetch('/api/dokumen', {
+        await authFetch('/api/dokumen', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -330,7 +331,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   const handleDeleteDokumen = async (docId: string, docName: string) => {
     if (!confirm(`Hapus dokumen "${docName}"?`)) return;
     try {
-      await fetch(`/api/dokumen/${docId}`, { method: 'DELETE' });
+      await authFetch(`/api/dokumen/${docId}`, { method: 'DELETE' });
       await fetchKeanggotaanAndDokumen();
     } catch (err) {
       console.error('Delete dokumen error:', err);
@@ -341,7 +342,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   const handleAddTahfidz = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/tahfidz', {
+      await authFetch('/api/tahfidz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -361,7 +362,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   const handleAddIzin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/perizinan', {
+      await authFetch('/api/perizinan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -380,7 +381,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   // Selesaikan Izin (Kembali ke Asrama)
   const handleSelesaiIzin = async (izinId: string) => {
     try {
-      await fetch(`/api/perizinan/${izinId}/selesai`, {
+      await authFetch(`/api/perizinan/${izinId}/selesai`, {
         method: 'PUT',
       });
       await fetchDetail();
@@ -395,7 +396,7 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
     e.preventDefault();
     if (!pelanggaranForm.deskripsi.trim()) return;
     try {
-      await fetch('/api/pelanggaran', {
+      await authFetch('/api/pelanggaran', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -17,6 +17,7 @@ import {
   Unlock
 } from 'lucide-react';
 import type { Asrama, Kamar, Santri, UserSession } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface KamarViewProps {
   asramas: Asrama[];
@@ -56,7 +57,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
   const fetchKamars = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/master/kamar');
+      const res = await authFetch('/api/master/kamar');
       const json = await res.json();
       setKamars(json.data || []);
     } catch (err) {
@@ -75,7 +76,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
     setActiveKamarDetail(kamar);
     setLoadingPenghuni(true);
     try {
-      const res = await fetch(`/api/kamar/${kamar.id}/penghuni`);
+      const res = await authFetch(`/api/kamar/${kamar.id}/penghuni`);
       const json = await res.json();
       setPenghuniList(json.data || []);
     } catch (err) {
@@ -89,7 +90,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
   const handleTogglePenuh = async (kamar: Kamar) => {
     if (isViewer) return;
     try {
-      const res = await fetch(`/api/kamar/${kamar.id}/toggle-penuh`, {
+      const res = await authFetch(`/api/kamar/${kamar.id}/toggle-penuh`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -113,7 +114,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
     // Fetch active students for selector
     setLoadingCandidates(true);
     try {
-      const res = await fetch('/api/santri?limit=1000&status=aktif');
+      const res = await authFetch('/api/santri?limit=1000&status=aktif');
       const json = await res.json();
       setCandidateSantriList(json.data || []);
     } catch (err) {
@@ -133,7 +134,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
 
     try {
       setSubmittingPindah(true);
-      const res = await fetch('/api/kamar/pindah', {
+      const res = await authFetch('/api/kamar/pindah', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pindahForm),

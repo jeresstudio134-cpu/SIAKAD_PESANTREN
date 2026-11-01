@@ -13,6 +13,7 @@ import {
   Filter
 } from 'lucide-react';
 import type { FilterParams, TahunAjaran } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -81,7 +82,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const handleExecuteExport = async () => {
     setIsExporting(true);
     try {
-      const res = await fetch('/api/export/custom', {
+      const res = await authFetch('/api/export/custom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

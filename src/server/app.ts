@@ -48,10 +48,38 @@ export function isSantriInScope(user: any, santri: any): boolean {
   return true;
 }
 
+function getClientIp(c: any): string {
+  const fwd = c.req.header('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0].trim();
+  return c.req.header('cf-connecting-ip') || '127.0.0.1';
+}
+
+function generateRandomPassword(length = 10): string {
+  const lettersUpper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lettersLower = 'abcdefghijkmnopqrstuvwxyz';
+  const numbers = '23456789';
+  let res = '';
+  res += lettersUpper[Math.floor(Math.random() * lettersUpper.length)];
+  res += lettersLower[Math.floor(Math.random() * lettersLower.length)];
+  res += numbers[Math.floor(Math.random() * numbers.length)];
+  const allChars = lettersUpper + lettersLower + numbers;
+  for (let i = 3; i < length; i++) {
+    res += allChars[Math.floor(Math.random() * allChars.length)];
+  }
+  return res.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
 // Helper to get authenticated user and their scoped permissions
 async function getAuthUser(c: any) {
-  const cookieHeader = c.req.header('Cookie');
-  const token = getCookie(cookieHeader, 'siakad_session');
+  const authHeader = c.req.header('Authorization');
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  if (!token) {
+    token = c.req.header('X-Session-Token') || null;
+  }
+  if (!token) {
+    const cookieHeader = c.req.header('Cookie');
+    token = getCookie(cookieHeader, 'siakad_session');
+  }
   if (!token) return null;
 
   const db = getDb(c);
@@ -70,13 +98,15 @@ async function getAuthUser(c: any) {
       avatarUrl: schema.users.avatarUrl,
       isActive: schema.users.isActive,
       mustChangePassword: schema.users.mustChangePassword,
+      deletedAt: schema.users.deletedAt,
+      stafId: schema.users.stafId,
     })
     .from(schema.sessions)
     .innerJoin(schema.users, eq(schema.sessions.userId, schema.users.id))
     .where(eq(schema.sessions.token, token))
     .get();
 
-  if (!session || new Date(session.expiresAt) < new Date() || !session.isActive) {
+  if (!session || new Date(session.expiresAt) < new Date() || !session.isActive || session.deletedAt) {
     return null;
   }
 
@@ -108,14 +138,67 @@ async function getAuthUser(c: any) {
     phone: session.phone,
     avatarUrl: session.avatarUrl,
     mustChangePassword: session.mustChangePassword === 1,
+    stafId: session.stafId,
   };
 }
+
+// -------------------------------------------------------------
+// GLOBAL SERVER-SIDE AUTH & ACCESS CONTROL MIDDLEWARE
+// -------------------------------------------------------------
+app.use('/api/*', async (c, next) => {
+  const path = c.req.path;
+  // Whitelist login
+  if (path === '/api/auth/login') {
+    return next();
+  }
+
+  // Quick login is strictly blocked unless DEV_MODE is explicitly 'true'
+  if (path === '/api/auth/quick-login') {
+    if (process.env.DEV_MODE === 'true') {
+      return next();
+    }
+    return c.json({ error: 'Fitur quick-login dinonaktifkan demi keamanan produksi' }, 403);
+  }
+
+  const user = await getAuthUser(c);
+  if (!user) {
+    return c.json({ error: 'Sesi tidak valid atau telah berakhir. Silakan login kembali.' }, 401);
+  }
+
+  // Extend active session duration (8 hours sliding expiry)
+  const authHeader = c.req.header('Authorization');
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  if (!token) {
+    token = c.req.header('X-Session-Token') || null;
+  }
+  if (!token) {
+    const cookieHeader = c.req.header('Cookie');
+    token = getCookie(cookieHeader, 'siakad_session');
+  }
+  if (token) {
+    c.header('Set-Cookie', `siakad_session=${token}; Path=/; HttpOnly; SameSite=None; Secure; Partitioned; Max-Age=${8 * 3600}`);
+    c.header('X-Session-Token', token);
+  }
+
+  // Enforce read-only for Viewer role on mutation methods
+  if (user.role === 'viewer') {
+    const method = c.req.method.toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      if (path !== '/api/auth/change-password' && path !== '/api/auth/logout') {
+        return c.json({ error: 'Akses ditolak: Akun Viewer hanya memiliki hak baca (Read-Only)' }, 403);
+      }
+    }
+  }
+
+  return next();
+});
 
 // -------------------------------------------------------------
 // AUTH & SESSION ENDPOINTS
 // -------------------------------------------------------------
 
 app.post('/api/auth/login', async (c) => {
+  const ipAddress = getClientIp(c);
   try {
     const { username, password } = await c.req.json();
     if (!username || !password) {
@@ -123,37 +206,126 @@ app.post('/api/auth/login', async (c) => {
     }
 
     const db = getDb(c);
+    const cleanUsername = username.trim().toLowerCase();
     const user = await db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.username, username.trim().toLowerCase()))
+      .where(and(eq(schema.users.username, cleanUsername), isNull(schema.users.deletedAt)))
       .get();
 
     if (!user) {
-      return c.json({ error: 'Username atau kata sandi tidak sesuai' }, 401);
+      // Record failed attempt for non-existent user
+      await db.insert(schema.auditLogs).values({
+        id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        userId: null,
+        action: 'LOGIN_FAILED',
+        entityType: 'auth',
+        entityId: null,
+        details: JSON.stringify({ username: cleanUsername, reason: 'Pengguna tidak ditemukan' }),
+        ipAddress,
+        createdAt: new Date().toISOString(),
+      });
+      return c.json({ error: 'Username atau kata sandi salah' }, 401);
+    }
+
+    // Check account lockout
+    if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+      const remainingMinutes = Math.max(1, Math.ceil((new Date(user.lockedUntil).getTime() - Date.now()) / 60000));
+      await db.insert(schema.auditLogs).values({
+        id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        userId: user.id,
+        action: 'LOGIN_LOCKED',
+        entityType: 'auth',
+        entityId: user.id,
+        details: JSON.stringify({ username: user.username, remainingMinutes }),
+        ipAddress,
+        createdAt: new Date().toISOString(),
+      });
+      return c.json({
+        error: `Akun terkunci sementara karena 5 kali percobaan gagal. Silakan coba lagi dalam ${remainingMinutes} menit.`,
+      }, 429);
     }
 
     const isMatch = await verifyPassword(password, user.passwordHash, user.salt);
     if (!isMatch) {
-      return c.json({ error: 'Username atau kata sandi tidak sesuai' }, 401);
+      const newFailedCount = (user.failedLoginCount || 0) + 1;
+      let newLockedUntil = user.lockedUntil;
+      let errorMessage = 'Username atau kata sandi salah';
+
+      if (newFailedCount >= 5) {
+        newLockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        errorMessage = 'Akun terkunci sementara selama 15 menit karena 5 kali percobaan gagal.';
+      }
+
+      await db.update(schema.users).set({
+        failedLoginCount: newFailedCount,
+        lockedUntil: newLockedUntil,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(schema.users.id, user.id));
+
+      await db.insert(schema.auditLogs).values({
+        id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        userId: user.id,
+        action: 'LOGIN_FAILED',
+        entityType: 'auth',
+        entityId: user.id,
+        details: JSON.stringify({ username: user.username, failedAttempts: newFailedCount }),
+        ipAddress,
+        createdAt: new Date().toISOString(),
+      });
+
+      return c.json({ error: errorMessage }, 401);
     }
 
     if (!user.isActive) {
-      return c.json({ error: 'Akun dinonaktifkan oleh administrator' }, 403);
+      await db.insert(schema.auditLogs).values({
+        id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        userId: user.id,
+        action: 'LOGIN_INACTIVE',
+        entityType: 'auth',
+        entityId: user.id,
+        details: JSON.stringify({ username: user.username, reason: 'Akun dinonaktifkan' }),
+        ipAddress,
+        createdAt: new Date().toISOString(),
+      });
+      return c.json({ error: 'Akun dinonaktifkan oleh administrator. Silakan hubungi Super Admin.' }, 403);
     }
 
+    // Reset failed counter and lock
+    const now = new Date().toISOString();
+    await db.update(schema.users).set({
+      failedLoginCount: 0,
+      lockedUntil: null,
+      lastLoginAt: now,
+      updatedAt: now,
+    }).where(eq(schema.users.id, user.id));
+
+    // Create session (8 jam)
     const token = generateSessionToken();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
 
     await db.insert(schema.sessions).values({
       id: 'sess-' + Math.random().toString(36).substring(2),
       token,
       userId: user.id,
       expiresAt,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     });
 
-    c.header('Set-Cookie', `siakad_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`);
+    c.header('Set-Cookie', `siakad_session=${token}; Path=/; HttpOnly; SameSite=None; Secure; Partitioned; Max-Age=${8 * 3600}`);
+    c.header('X-Session-Token', token);
+
+    // Audit log login success
+    await db.insert(schema.auditLogs).values({
+      id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      userId: user.id,
+      action: 'LOGIN_SUCCESS',
+      entityType: 'auth',
+      entityId: user.id,
+      details: JSON.stringify({ username: user.username, role: user.role }),
+      ipAddress,
+      createdAt: now,
+    });
 
     let assignedLembaga: string[] = [];
     let assignedAsrama: string[] = [];
@@ -164,6 +336,7 @@ app.post('/api/auth/login', async (c) => {
 
     return c.json({
       success: true,
+      token,
       user: {
         id: user.id,
         username: user.username,
@@ -175,6 +348,7 @@ app.post('/api/auth/login', async (c) => {
         phone: user.phone,
         avatarUrl: user.avatarUrl,
         mustChangePassword: user.mustChangePassword === 1,
+        stafId: user.stafId,
       },
     });
   } catch (err: any) {
@@ -183,31 +357,20 @@ app.post('/api/auth/login', async (c) => {
 });
 
 app.post('/api/auth/quick-login', async (c) => {
+  if (process.env.DEV_MODE !== 'true') {
+    return c.json({ error: 'Quick login hanya tersedia saat DEV_MODE=true' }, 403);
+  }
   try {
     const { username, role } = await c.req.json();
     const db = getDb(c);
 
     let user;
     if (username) {
-      user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
-    } else if (role === 'pengurus_asrama_putra') {
-      user = await db.select().from(schema.users).where(eq(schema.users.username, 'musyrif_putra')).get();
-      if (!user) {
-        user = await db.select().from(schema.users).where(eq(schema.users.scopeAsrama, 'putra')).get();
-      }
-    } else if (role === 'pengurus_asrama_putri') {
-      user = await db.select().from(schema.users).where(eq(schema.users.username, 'musyrifah_putri')).get();
-      if (!user) {
-        user = await db.select().from(schema.users).where(eq(schema.users.scopeAsrama, 'putri')).get();
-      }
+      user = await db.select().from(schema.users).where(and(eq(schema.users.username, username), isNull(schema.users.deletedAt))).get();
     } else if (role) {
-      user = await db.select().from(schema.users).where(eq(schema.users.role, role)).get();
+      user = await db.select().from(schema.users).where(and(eq(schema.users.role, role), isNull(schema.users.deletedAt))).get();
     } else {
-      user = await db.select().from(schema.users).where(eq(schema.users.role, 'superadmin')).get();
-    }
-
-    if (!user) {
-      user = await db.select().from(schema.users).get();
+      user = await db.select().from(schema.users).where(and(eq(schema.users.role, 'superadmin'), isNull(schema.users.deletedAt))).get();
     }
 
     if (!user) {
@@ -215,7 +378,7 @@ app.post('/api/auth/quick-login', async (c) => {
     }
 
     const token = generateSessionToken();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
 
     await db.insert(schema.sessions).values({
       id: 'sess-' + Math.random().toString(36).substring(2),
@@ -225,7 +388,7 @@ app.post('/api/auth/quick-login', async (c) => {
       createdAt: new Date().toISOString(),
     });
 
-    c.header('Set-Cookie', `siakad_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`);
+    c.header('Set-Cookie', `siakad_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${8 * 3600}`);
 
     let assignedLembaga: string[] = [];
     let assignedAsrama: string[] = [];
@@ -247,6 +410,7 @@ app.post('/api/auth/quick-login', async (c) => {
         phone: user.phone,
         avatarUrl: user.avatarUrl,
         mustChangePassword: user.mustChangePassword === 1,
+        stafId: user.stafId,
       },
     });
   } catch (err: any) {
@@ -267,12 +431,25 @@ app.post('/api/auth/change-password', async (c) => {
     }
 
     const { currentPassword, newPassword, confirmPassword } = await c.req.json();
+    if (!currentPassword) {
+      return c.json({ error: 'Kata sandi saat ini wajib diisi' }, 400);
+    }
     if (!newPassword || newPassword.length < 8) {
       return c.json({ error: 'Kata sandi baru minimal harus 8 karakter' }, 400);
     }
 
+    const hasLetters = /[a-zA-Z]/.test(newPassword);
+    const hasNumbers = /[0-9]/.test(newPassword);
+    if (!hasLetters || !hasNumbers) {
+      return c.json({ error: 'Kata sandi baru harus mengandung kombinasi huruf dan angka' }, 400);
+    }
+
     if (newPassword !== confirmPassword) {
       return c.json({ error: 'Konfirmasi kata sandi tidak cocok dengan kata sandi baru' }, 400);
+    }
+
+    if (currentPassword === newPassword) {
+      return c.json({ error: 'Kata sandi baru tidak boleh sama dengan kata sandi saat ini' }, 400);
     }
 
     const db = getDb(c);
@@ -281,12 +458,9 @@ app.post('/api/auth/change-password', async (c) => {
       return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
     }
 
-    // Jika kata sandi saat ini disertakan, verifikasi kesesuaiannya
-    if (currentPassword) {
-      const isMatch = await verifyPassword(currentPassword, user.passwordHash, user.salt);
-      if (!isMatch) {
-        return c.json({ error: 'Kata sandi saat ini tidak sesuai' }, 400);
-      }
+    const isMatch = await verifyPassword(currentPassword, user.passwordHash, user.salt);
+    if (!isMatch) {
+      return c.json({ error: 'Kata sandi saat ini tidak sesuai' }, 400);
     }
 
     const { hash, salt } = await hashPassword(newPassword);
@@ -301,13 +475,13 @@ app.post('/api/auth/change-password', async (c) => {
 
     // Catat log audit pergantian kata sandi
     await db.insert(schema.auditLogs).values({
-      id: 'aud-' + Date.now(),
+      id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       userId: user.id,
       action: 'CHANGE_PASSWORD',
       entityType: 'users',
       entityId: user.id,
       details: JSON.stringify({ message: 'Kata sandi akun berhasil diperbarui', username: user.username }),
-      ipAddress: c.req.header('x-forwarded-for') || '127.0.0.1',
+      ipAddress: getClientIp(c),
       createdAt: now,
     });
 
@@ -321,13 +495,20 @@ app.post('/api/auth/change-password', async (c) => {
 });
 
 app.post('/api/auth/logout', async (c) => {
-  const cookieHeader = c.req.header('Cookie');
-  const token = getCookie(cookieHeader, 'siakad_session');
+  const authHeader = c.req.header('Authorization');
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  if (!token) {
+    token = c.req.header('X-Session-Token') || null;
+  }
+  if (!token) {
+    const cookieHeader = c.req.header('Cookie');
+    token = getCookie(cookieHeader, 'siakad_session');
+  }
   if (token) {
     const db = getDb(c);
     await db.delete(schema.sessions).where(eq(schema.sessions.token, token));
   }
-  c.header('Set-Cookie', 'siakad_session=; Path=/; HttpOnly; Max-Age=0');
+  c.header('Set-Cookie', 'siakad_session=; Path=/; HttpOnly; SameSite=None; Secure; Partitioned; Max-Age=0');
   return c.json({ success: true });
 });
 
@@ -1138,7 +1319,75 @@ app.get('/api/users', async (c) => {
   }
 
   const db = getDb(c);
-  const rows = await db.select().from(schema.users).orderBy(asc(schema.users.username)).all();
+  const search = c.req.query('search') || '';
+  const role = c.req.query('role') || 'semua';
+  const status = c.req.query('status') || 'semua';
+  const page = parseInt(c.req.query('page') || '1', 10);
+  const limit = parseInt(c.req.query('limit') || '10', 10);
+  const offset = (page - 1) * limit;
+
+  // Build conditions
+  const conditions: any[] = [isNull(schema.users.deletedAt)];
+
+  if (search) {
+    const searchPattern = `%${search.trim().toLowerCase()}%`;
+    conditions.push(or(
+      like(sql<string>`lower(${schema.users.fullName})`, searchPattern),
+      like(sql<string>`lower(${schema.users.username})`, searchPattern),
+      like(sql<string>`lower(${schema.users.phone})`, searchPattern)
+    ));
+  }
+
+  if (role && role !== 'semua') {
+    conditions.push(eq(schema.users.role, role));
+  }
+
+  if (status === 'aktif') {
+    conditions.push(eq(schema.users.isActive, 1));
+  } else if (status === 'nonaktif') {
+    conditions.push(eq(schema.users.isActive, 0));
+  }
+
+  const whereClause = and(...conditions);
+
+  // Total count
+  const countRes = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(whereClause)
+    .get();
+
+  const total = countRes?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  // Rows with optional linked staf name
+  const rows = await db
+    .select({
+      id: schema.users.id,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+      role: schema.users.role,
+      assignedLembagaIds: schema.users.assignedLembagaIds,
+      assignedAsramaIds: schema.users.assignedAsramaIds,
+      scopeAsrama: schema.users.scopeAsrama,
+      phone: schema.users.phone,
+      isActive: schema.users.isActive,
+      mustChangePassword: schema.users.mustChangePassword,
+      lastLoginAt: schema.users.lastLoginAt,
+      failedLoginCount: schema.users.failedLoginCount,
+      lockedUntil: schema.users.lockedUntil,
+      stafId: schema.users.stafId,
+      createdAt: schema.users.createdAt,
+      updatedAt: schema.users.updatedAt,
+      stafNama: schema.staf.namaLengkap,
+    })
+    .from(schema.users)
+    .leftJoin(schema.staf, eq(schema.users.stafId, schema.staf.id))
+    .where(whereClause)
+    .orderBy(desc(schema.users.createdAt))
+    .limit(limit)
+    .offset(offset)
+    .all();
 
   const formatted = rows.map((u) => {
     let lembagaIds: string[] = [];
@@ -1158,11 +1407,24 @@ app.get('/api/users', async (c) => {
       scopeAsrama: u.scopeAsrama || 'semua',
       phone: u.phone,
       isActive: u.isActive,
+      mustChangePassword: u.mustChangePassword === 1,
+      lastLoginAt: u.lastLoginAt,
+      failedLoginCount: u.failedLoginCount,
+      lockedUntil: u.lockedUntil,
+      stafId: u.stafId,
+      stafNama: u.stafNama,
       createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
     };
   });
 
-  return c.json({ data: formatted });
+  return c.json({
+    data: formatted,
+    total,
+    page,
+    totalPages,
+    limit,
+  });
 });
 
 app.post('/api/users', async (c) => {
@@ -1172,25 +1434,37 @@ app.post('/api/users', async (c) => {
   }
 
   const payload = await c.req.json();
-  const { username, password, fullName, role, assignedLembagaIds, assignedAsramaIds, scopeAsrama, phone } = payload;
+  const { username, fullName, role, assignedLembagaIds, assignedAsramaIds, scopeAsrama, phone, stafId } = payload;
 
-  if (!username || !password || !fullName || !role) {
-    return c.json({ error: 'Username, password, nama lengkap, dan role wajib diisi' }, 400);
+  if (!username || !fullName || !role) {
+    return c.json({ error: 'Nama lengkap, username, dan role wajib diisi' }, 400);
+  }
+
+  const cleanUsername = username.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,30}$/.test(cleanUsername)) {
+    return c.json({ error: 'Username hanya boleh huruf kecil, angka, dan garis bawah (_) minimal 3 karakter' }, 400);
   }
 
   const db = getDb(c);
-  const existing = await db.select().from(schema.users).where(eq(schema.users.username, username.trim().toLowerCase())).get();
+  const existing = await db
+    .select()
+    .from(schema.users)
+    .where(and(eq(schema.users.username, cleanUsername), isNull(schema.users.deletedAt)))
+    .get();
+
   if (existing) {
-    return c.json({ error: 'Username sudah digunakan' }, 409);
+    return c.json({ error: `Username "${cleanUsername}" sudah digunakan` }, 409);
   }
 
-  const { hash, salt } = await hashPassword(password);
+  // Generate strong random initial password (letters + numbers)
+  const generatedPassword = generateRandomPassword(10);
+  const { hash, salt } = await hashPassword(generatedPassword);
   const now = new Date().toISOString();
-  const id = 'usr-' + Date.now();
+  const id = 'usr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
 
   await db.insert(schema.users).values({
     id,
-    username: username.trim().toLowerCase(),
+    username: cleanUsername,
     passwordHash: hash,
     salt,
     fullName: fullName.trim(),
@@ -1199,12 +1473,40 @@ app.post('/api/users', async (c) => {
     assignedAsramaIds: Array.isArray(assignedAsramaIds) ? JSON.stringify(assignedAsramaIds) : null,
     scopeAsrama: scopeAsrama || 'semua',
     phone: phone || null,
+    stafId: stafId || null,
     isActive: 1,
+    mustChangePassword: 1, // User wajib mengganti password saat login pertama
     createdAt: now,
     updatedAt: now,
   });
 
-  return c.json({ success: true, id }, 201);
+  // Catat Audit Log
+  await db.insert(schema.auditLogs).values({
+    id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    userId: currentUser.id,
+    action: 'CREATE_USER',
+    entityType: 'users',
+    entityId: id,
+    details: JSON.stringify({
+      username: cleanUsername,
+      fullName: fullName.trim(),
+      role,
+      scopeAsrama: scopeAsrama || 'semua',
+      assignedLembagaIds,
+      assignedAsramaIds,
+      createdBy: currentUser.username,
+    }),
+    ipAddress: getClientIp(c),
+    createdAt: now,
+  });
+
+  return c.json({
+    success: true,
+    id,
+    username: cleanUsername,
+    generatedPassword,
+    message: 'Akun berhasil dibuat. Berikan kata sandi awal kepada pengguna.',
+  }, 201);
 });
 
 app.put('/api/users/:id', async (c) => {
@@ -1218,13 +1520,23 @@ app.put('/api/users/:id', async (c) => {
   const db = getDb(c);
   const now = new Date().toISOString();
 
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  if (!user || user.deletedAt) {
+    return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+  }
+
+  // Prevent superadmin demoting themselves if they are the only active superadmin
+  if (id === currentUser.id && payload.role && payload.role !== 'superadmin') {
+    return c.json({ error: 'Anda tidak dapat mengubah role Super Admin akun Anda sendiri' }, 400);
+  }
+
   const updates: any = {
-    fullName: payload.fullName,
-    role: payload.role,
-    phone: payload.phone || null,
-    isActive: payload.isActive !== undefined ? payload.isActive : 1,
-    assignedLembagaIds: Array.isArray(payload.assignedLembagaIds) ? JSON.stringify(payload.assignedLembagaIds) : null,
-    assignedAsramaIds: Array.isArray(payload.assignedAsramaIds) ? JSON.stringify(payload.assignedAsramaIds) : null,
+    fullName: payload.fullName !== undefined ? payload.fullName.trim() : user.fullName,
+    role: payload.role || user.role,
+    phone: payload.phone !== undefined ? payload.phone : user.phone,
+    stafId: payload.stafId !== undefined ? payload.stafId : user.stafId,
+    assignedLembagaIds: Array.isArray(payload.assignedLembagaIds) ? JSON.stringify(payload.assignedLembagaIds) : user.assignedLembagaIds,
+    assignedAsramaIds: Array.isArray(payload.assignedAsramaIds) ? JSON.stringify(payload.assignedAsramaIds) : user.assignedAsramaIds,
     updatedAt: now,
   };
 
@@ -1232,14 +1544,142 @@ app.put('/api/users/:id', async (c) => {
     updates.scopeAsrama = payload.scopeAsrama;
   }
 
-  if (payload.password) {
-    const { hash, salt } = await hashPassword(payload.password);
-    updates.passwordHash = hash;
-    updates.salt = salt;
+  await db.update(schema.users).set(updates).where(eq(schema.users.id, id));
+
+  await db.insert(schema.auditLogs).values({
+    id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    userId: currentUser.id,
+    action: 'UPDATE_USER',
+    entityType: 'users',
+    entityId: id,
+    details: JSON.stringify({
+      username: user.username,
+      updatedFields: Object.keys(updates),
+      updatedBy: currentUser.username,
+    }),
+    ipAddress: getClientIp(c),
+    createdAt: now,
+  });
+
+  return c.json({ success: true, message: 'Data akun berhasil diperbarui' });
+});
+
+app.post('/api/users/:id/toggle-status', async (c) => {
+  const currentUser = await getAuthUser(c);
+  if (!currentUser || currentUser.role !== 'superadmin') {
+    return c.json({ error: 'Akses ditolak' }, 403);
   }
 
-  await db.update(schema.users).set(updates).where(eq(schema.users.id, id));
-  return c.json({ success: true });
+  const id = c.req.param('id');
+  if (id === currentUser.id) {
+    return c.json({ error: 'Anda tidak dapat menonaktifkan akun Anda sendiri' }, 400);
+  }
+
+  const db = getDb(c);
+  const targetUser = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  if (!targetUser || targetUser.deletedAt) {
+    return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+  }
+
+  const nextStatus = targetUser.isActive === 1 ? 0 : 1;
+
+  // If deactivating a superadmin, ensure at least one other active superadmin remains
+  if (targetUser.role === 'superadmin' && nextStatus === 0) {
+    const activeSuperAdmins = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.users)
+      .where(and(eq(schema.users.role, 'superadmin'), eq(schema.users.isActive, 1), isNull(schema.users.deletedAt)))
+      .get();
+
+    if ((activeSuperAdmins?.count || 0) <= 1) {
+      return c.json({ error: 'Tidak dapat menonaktifkan: Harus selalu ada minimal 1 Super Admin aktif di sistem' }, 400);
+    }
+  }
+
+  const now = new Date().toISOString();
+  await db.update(schema.users).set({
+    isActive: nextStatus,
+    updatedAt: now,
+  }).where(eq(schema.users.id, id));
+
+  // If deactivated, IMMEDIATELY revoke all active sessions for this user
+  if (nextStatus === 0) {
+    await db.delete(schema.sessions).where(eq(schema.sessions.userId, id));
+  }
+
+  await db.insert(schema.auditLogs).values({
+    id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    userId: currentUser.id,
+    action: 'TOGGLE_USER_STATUS',
+    entityType: 'users',
+    entityId: id,
+    details: JSON.stringify({
+      username: targetUser.username,
+      newStatus: nextStatus === 1 ? 'Aktif' : 'Nonaktif',
+      sessionsRevoked: nextStatus === 0,
+      toggledBy: currentUser.username,
+    }),
+    ipAddress: getClientIp(c),
+    createdAt: now,
+  });
+
+  return c.json({
+    success: true,
+    isActive: nextStatus,
+    message: nextStatus === 1 ? 'Akun telah diaktifkan kembali' : 'Akun telah dinonaktifkan dan sesi dicabut',
+  });
+});
+
+app.post('/api/users/:id/reset-password', async (c) => {
+  const currentUser = await getAuthUser(c);
+  if (!currentUser || currentUser.role !== 'superadmin') {
+    return c.json({ error: 'Akses ditolak' }, 403);
+  }
+
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const targetUser = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  if (!targetUser || targetUser.deletedAt) {
+    return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+  }
+
+  // Generate new random temporary password
+  const newTempPassword = generateRandomPassword(10);
+  const { hash, salt } = await hashPassword(newTempPassword);
+  const now = new Date().toISOString();
+
+  await db.update(schema.users).set({
+    passwordHash: hash,
+    salt,
+    mustChangePassword: 1, // Wajib ganti sandi saat login berikutnya
+    failedLoginCount: 0,
+    lockedUntil: null,
+    updatedAt: now,
+  }).where(eq(schema.users.id, id));
+
+  // Revoke ALL existing sessions for this user
+  await db.delete(schema.sessions).where(eq(schema.sessions.userId, id));
+
+  await db.insert(schema.auditLogs).values({
+    id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    userId: currentUser.id,
+    action: 'RESET_PASSWORD',
+    entityType: 'users',
+    entityId: id,
+    details: JSON.stringify({
+      username: targetUser.username,
+      resetBy: currentUser.username,
+      message: 'Kata sandi di-reset dan semua sesi lama dicabut',
+    }),
+    ipAddress: getClientIp(c),
+    createdAt: now,
+  });
+
+  return c.json({
+    success: true,
+    generatedPassword: newTempPassword,
+    message: 'Kata sandi berhasil di-reset. Berikan sandi sementara ini kepada pengguna.',
+  });
 });
 
 app.delete('/api/users/:id', async (c) => {
@@ -1254,8 +1694,93 @@ app.delete('/api/users/:id', async (c) => {
   }
 
   const db = getDb(c);
-  await db.delete(schema.users).where(eq(schema.users.id, id));
-  return c.json({ success: true });
+  const targetUser = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  if (!targetUser || targetUser.deletedAt) {
+    return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+  }
+
+  // Verify at least one active superadmin remains
+  if (targetUser.role === 'superadmin') {
+    const activeSuperAdmins = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.users)
+      .where(and(eq(schema.users.role, 'superadmin'), eq(schema.users.isActive, 1), isNull(schema.users.deletedAt)))
+      .get();
+
+    if ((activeSuperAdmins?.count || 0) <= 1) {
+      return c.json({ error: 'Tidak dapat menghapus: Harus selalu ada minimal 1 Super Admin aktif di sistem' }, 400);
+    }
+  }
+
+  const now = new Date().toISOString();
+  // Soft delete and deactivate
+  await db.update(schema.users).set({
+    deletedAt: now,
+    isActive: 0,
+    updatedAt: now,
+  }).where(eq(schema.users.id, id));
+
+  // Revoke all sessions
+  await db.delete(schema.sessions).where(eq(schema.sessions.userId, id));
+
+  await db.insert(schema.auditLogs).values({
+    id: 'aud-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    userId: currentUser.id,
+    action: 'DELETE_USER',
+    entityType: 'users',
+    entityId: id,
+    details: JSON.stringify({
+      username: targetUser.username,
+      fullName: targetUser.fullName,
+      role: targetUser.role,
+      deletedBy: currentUser.username,
+    }),
+    ipAddress: getClientIp(c),
+    createdAt: now,
+  });
+
+  return c.json({ success: true, message: `Akun ${targetUser.username} berhasil dihapus` });
+});
+
+app.get('/api/users/:id/login-history', async (c) => {
+  const currentUser = await getAuthUser(c);
+  if (!currentUser || currentUser.role !== 'superadmin') {
+    return c.json({ error: 'Akses ditolak' }, 403);
+  }
+
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const targetUser = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  if (!targetUser) {
+    return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+  }
+
+  const logs = await db
+    .select()
+    .from(schema.auditLogs)
+    .where(
+      and(
+        or(
+          eq(schema.auditLogs.userId, id),
+          eq(schema.auditLogs.entityId, id),
+          like(schema.auditLogs.details, `%"username":"${targetUser.username}"%`)
+        ),
+        inArray(schema.auditLogs.action, [
+          'LOGIN_SUCCESS',
+          'LOGIN_FAILED',
+          'LOGIN_LOCKED',
+          'LOGIN_INACTIVE',
+          'CHANGE_PASSWORD',
+          'RESET_PASSWORD',
+          'TOGGLE_USER_STATUS'
+        ])
+      )
+    )
+    .orderBy(desc(schema.auditLogs.createdAt))
+    .limit(30)
+    .all();
+
+  return c.json({ data: logs });
 });
 
 // -------------------------------------------------------------

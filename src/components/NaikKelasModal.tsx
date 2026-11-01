@@ -20,6 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import type { TahunAjaran, Lembaga, KenaikanKelasPreviewItem, ProsesKenaikanKelasLog } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface NaikKelasModalProps {
   isOpen: boolean;
@@ -98,7 +99,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
 
   const fetchKamars = async () => {
     try {
-      const res = await fetch('/api/master/kamar');
+      const res = await authFetch('/api/master/kamar');
       const json = await res.json();
       if (json.data) {
         setAllKamars(json.data);
@@ -111,7 +112,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
   const fetchHistory = async () => {
     try {
       setLoadingHistory(true);
-      const res = await fetch('/api/naik-kelas/history');
+      const res = await authFetch('/api/naik-kelas/history');
       const json = await res.json();
       if (json.data) {
         setHistoryList(json.data);
@@ -155,7 +156,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
         lembagaId: selectedLembagaId,
       });
 
-      const res = await fetch(`/api/naik-kelas/preview?${params.toString()}`);
+      const res = await authFetch(`/api/naik-kelas/preview?${params.toString()}`);
       const json = await res.json();
 
       if (!res.ok) {
@@ -230,7 +231,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
         })),
       };
 
-      const res = await fetch('/api/naik-kelas/execute', {
+      const res = await authFetch('/api/naik-kelas/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -263,7 +264,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
       setRollingBackId(processId);
       setErrorMessage(null);
 
-      const res = await fetch(`/api/naik-kelas/rollback/${processId}`, {
+      const res = await authFetch(`/api/naik-kelas/rollback/${processId}`, {
         method: 'POST',
       });
       const json = await res.json();

@@ -18,6 +18,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import type { Staf, StafPenugasan, Lembaga, Kelas, TahunAjaran } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface StafViewProps {
   onOpenAddModal?: () => void;
@@ -72,9 +73,9 @@ export const StafView: React.FC<StafViewProps> = () => {
   const fetchMasterRefs = async () => {
     try {
       const [lRes, cRes, taRes] = await Promise.all([
-        fetch('/api/master/lembaga'),
-        fetch('/api/master/kelas'),
-        fetch('/api/master/tahun-ajaran'),
+        authFetch('/api/master/lembaga'),
+        authFetch('/api/master/kelas'),
+        authFetch('/api/master/tahun-ajaran'),
       ]);
       const [lData, cData, taData] = await Promise.all([
         lRes.json(),
@@ -101,7 +102,7 @@ export const StafView: React.FC<StafViewProps> = () => {
       if (jabatanFilter !== 'semua') params.set('jabatan', jabatanFilter);
       if (statusFilter !== 'semua') params.set('statusKepegawaian', statusFilter);
 
-      const res = await fetch(`/api/staf?${params.toString()}`);
+      const res = await authFetch(`/api/staf?${params.toString()}`);
       const data = await res.json();
       let list: Staf[] = data.data || [];
       if (bagianFilter !== 'semua') {
@@ -173,7 +174,7 @@ export const StafView: React.FC<StafViewProps> = () => {
       const url = editingStaf ? `/api/staf/${editingStaf.id}` : '/api/staf';
       const method = editingStaf ? 'PUT' : 'POST';
 
-      await fetch(url, {
+      await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
@@ -189,7 +190,7 @@ export const StafView: React.FC<StafViewProps> = () => {
   const handleDelete = async (id: string, nama: string) => {
     if (!confirm(`Hapus data ${nama}?`)) return;
     try {
-      await fetch(`/api/staf/${id}`, { method: 'DELETE' });
+      await authFetch(`/api/staf/${id}`, { method: 'DELETE' });
       fetchStaf();
     } catch (err) {
       console.error(err);
@@ -205,7 +206,7 @@ export const StafView: React.FC<StafViewProps> = () => {
     setSelectedStafForPenugasan(staf);
     setLoadingPenugasan(true);
     try {
-      const res = await fetch(`/api/staf/penugasan?stafId=${staf.id}`);
+      const res = await authFetch(`/api/staf/penugasan?stafId=${staf.id}`);
       const json = await res.json();
       setPenugasanList(json.data || []);
     } catch (err) {
@@ -220,7 +221,7 @@ export const StafView: React.FC<StafViewProps> = () => {
     if (!selectedStafForPenugasan || !penugasanForm.tahunAjaranId) return;
 
     try {
-      await fetch('/api/staf/penugasan', {
+      await authFetch('/api/staf/penugasan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -235,7 +236,7 @@ export const StafView: React.FC<StafViewProps> = () => {
       setShowAddPenugasan(false);
       setPenugasanForm((prev) => ({ ...prev, tugasMapel: '', waliKelasId: '' }));
       // Refresh list
-      const res = await fetch(`/api/staf/penugasan?stafId=${selectedStafForPenugasan.id}`);
+      const res = await authFetch(`/api/staf/penugasan?stafId=${selectedStafForPenugasan.id}`);
       const json = await res.json();
       setPenugasanList(json.data || []);
     } catch (err) {
@@ -246,9 +247,9 @@ export const StafView: React.FC<StafViewProps> = () => {
   const handleDeletePenugasan = async (id: string) => {
     if (!confirm('Hapus penugasan ini?')) return;
     try {
-      await fetch(`/api/staf/penugasan/${id}`, { method: 'DELETE' });
+      await authFetch(`/api/staf/penugasan/${id}`, { method: 'DELETE' });
       if (selectedStafForPenugasan) {
-        const res = await fetch(`/api/staf/penugasan?stafId=${selectedStafForPenugasan.id}`);
+        const res = await authFetch(`/api/staf/penugasan?stafId=${selectedStafForPenugasan.id}`);
         const json = await res.json();
         setPenugasanList(json.data || []);
       }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Save, AlertCircle, Lock } from 'lucide-react';
 import type { Santri, Lembaga, Asrama, Kamar, TahunAjaran, UserSession } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface SantriFormModalProps {
   initialData?: Santri | null;
@@ -75,7 +76,7 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
   // Fetch Kamars when asramaId changes
   React.useEffect(() => {
     if (formData.asramaId) {
-      fetch(`/api/master/kamar?asramaId=${formData.asramaId}`)
+      authFetch(`/api/master/kamar?asramaId=${formData.asramaId}`)
         .then((res) => res.json())
         .then((data) => {
           setKamars(data.data || []);
@@ -139,7 +140,7 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
       const url = isEdit ? `/api/santri/${initialData.id}` : '/api/santri';
       const method = isEdit ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

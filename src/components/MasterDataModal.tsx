@@ -15,6 +15,7 @@ import {
   GraduationCap
 } from 'lucide-react';
 import type { Lembaga, Asrama, Kamar, TahunAjaran, Staf, Kelas } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface MasterDataModalProps {
   onClose: () => void;
@@ -91,12 +92,12 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     try {
       setLoading(true);
       const [lRes, cRes, aRes, kRes, taRes, sRes] = await Promise.all([
-        fetch('/api/master/lembaga'),
-        fetch('/api/master/kelas'),
-        fetch('/api/master/asrama'),
-        fetch('/api/master/kamar'),
-        fetch('/api/master/tahun-ajaran'),
-        fetch('/api/staf'),
+        authFetch('/api/master/lembaga'),
+        authFetch('/api/master/kelas'),
+        authFetch('/api/master/asrama'),
+        authFetch('/api/master/kamar'),
+        authFetch('/api/master/tahun-ajaran'),
+        authFetch('/api/staf'),
       ]);
 
       const [lData, cData, aData, kData, taData, sData] = await Promise.all([
@@ -142,7 +143,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
       .map((s) => s.trim())
       .filter(Boolean);
 
-    await fetch('/api/master/lembaga', {
+    await authFetch('/api/master/lembaga', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -167,7 +168,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     }
 
     try {
-      await fetch('/api/master/kelas', {
+      await authFetch('/api/master/kelas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(kelasForm),
@@ -192,7 +193,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
   const handleDeleteKelas = async (id: string, namaKelas: string) => {
     if (!confirm(`Hapus rombel/kelas "${namaKelas}"?`)) return;
     try {
-      await fetch(`/api/master/kelas/${id}`, { method: 'DELETE' });
+      await authFetch(`/api/master/kelas/${id}`, { method: 'DELETE' });
       fetchData();
       onRefreshParent();
     } catch (err) {
@@ -204,7 +205,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     e.preventDefault();
     if (!asramaForm.nama) return;
 
-    await fetch('/api/master/asrama', {
+    await authFetch('/api/master/asrama', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(asramaForm),
@@ -221,7 +222,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     const asrId = kamarForm.asramaId || selectedAsramaId;
     if (!asrId || !kamarForm.namaKamar) return;
 
-    await fetch('/api/master/kamar', {
+    await authFetch('/api/master/kamar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -241,7 +242,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     e.preventDefault();
     if (!taForm.nama) return;
 
-    await fetch('/api/master/tahun-ajaran', {
+    await authFetch('/api/master/tahun-ajaran', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(taForm),
@@ -263,7 +264,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     if (!window.confirm(`Jadikan ${name} sebagai Tahun Ajaran AKTIF saat ini? Sistem hanya mengizinkan 1 tahun ajaran aktif.`)) return;
 
     try {
-      const res = await fetch(`/api/master/tahun-ajaran/${id}/activate`, {
+      const res = await authFetch(`/api/master/tahun-ajaran/${id}/activate`, {
         method: 'POST',
       });
       const json = await res.json();

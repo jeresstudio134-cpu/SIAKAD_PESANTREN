@@ -287,7 +287,7 @@ export async function seedDatabase(rawDb: any) {
   }
 
   // 7. Seed Scoped Users & User Scopes Table
-  const defaultPassword = 'adminpesantren123';
+  const defaultPassword = process.env.SUPERADMIN_INITIAL_PASSWORD || 'PesantrenAdmin2026!';
   const { hash, salt } = await hashPassword(defaultPassword);
 
   const insertUser = rawDb.prepare(`
@@ -836,9 +836,12 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     try {
       const adminUser = rawDb.prepare("SELECT id, password_hash, salt, must_change_password FROM users WHERE username = 'admin'").get() as any;
       if (adminUser) {
-        const isDefault = await verifyPassword('adminpesantren123', adminUser.password_hash, adminUser.salt);
-        if (isDefault) {
-          rawDb.prepare("UPDATE users SET must_change_password = 1 WHERE username = 'admin'").run();
+        const isOldDefault = await verifyPassword('adminpesantren123', adminUser.password_hash, adminUser.salt);
+        if (isOldDefault) {
+          const initPass = process.env.SUPERADMIN_INITIAL_PASSWORD || 'PesantrenAdmin2026!';
+          const { hash: newHash, salt: newSalt } = await hashPassword(initPass);
+          rawDb.prepare("UPDATE users SET password_hash = ?, salt = ?, must_change_password = 1, failed_login_count = 0, locked_until = NULL WHERE username = 'admin'").run(newHash, newSalt);
+          console.log('🔄 Super Admin initial password updated to environment initial password.');
         }
       }
     } catch (e) {}

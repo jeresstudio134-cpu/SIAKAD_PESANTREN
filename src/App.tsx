@@ -21,15 +21,21 @@ import { KamarView } from './components/KamarView.tsx';
 import { AuditLogView } from './components/AuditLogView.tsx';
 import { ExportModal } from './components/ExportModal.tsx';
 import { ChangePasswordModal } from './components/ChangePasswordModal.tsx';
+import { LoginPage } from './components/LoginPage.tsx';
+import { ProfileModal } from './components/ProfileModal.tsx';
+import { UserManagementView } from './components/UserManagementView.tsx';
+import { authFetch, removeSessionToken } from './utils/api.ts';
 
 import type { Santri, DashboardStats, FilterParams, UserSession, Lembaga, Asrama, TahunAjaran } from './types/index.ts';
 
 export default function App() {
-  const [activeTab, setActiveTab] = React.useState<'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy'>('santri');
+  const [activeTab, setActiveTab] = React.useState<'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy'>('santri');
   const [currentUser, setCurrentUser] = React.useState<UserSession | null>(null);
+  const [sessionChecking, setSessionChecking] = React.useState(true);
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
   const [loadingStats, setLoadingStats] = React.useState(true);
   const [showExportModal, setShowExportModal] = React.useState(false);
+  const [showProfileModal, setShowProfileModal] = React.useState(false);
 
   // Master Data & Academic Year State
   const [lembagas, setLembagas] = React.useState<Lembaga[]>([]);
@@ -77,25 +83,37 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const [showManualChangePassword, setShowManualChangePassword] = React.useState(false);
 
-  // Fetch Current Session
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await authFetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {}
+    removeSessionToken();
+    setCurrentUser(null);
+    setShowProfileModal(false);
+    setShowManualChangePassword(false);
+  };
+
+  // Fetch Current Session (Strict: No auto-login)
   const fetchSession = async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      setSessionChecking(true);
+      const res = await authFetch('/api/auth/me');
+      if (res.status === 401) {
+        setCurrentUser(null);
+        return;
+      }
       const data = await res.json();
       if (data.user) {
         setCurrentUser(data.user);
       } else {
-        // Auto default to Superadmin for initial preview
-        const qRes = await fetch('/api/auth/quick-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'superadmin' }),
-        });
-        const qData = await qRes.json();
-        if (qData.user) setCurrentUser(qData.user);
+        setCurrentUser(null);
       }
     } catch (err) {
       console.error(err);
+      setCurrentUser(null);
+    } finally {
+      setSessionChecking(false);
     }
   };
 
@@ -103,9 +121,9 @@ export default function App() {
   const fetchMasterData = async () => {
     try {
       const [lRes, aRes, taRes] = await Promise.all([
-        fetch('/api/master/lembaga'),
-        fetch('/api/master/asrama'),
-        fetch('/api/master/tahun-ajaran'),
+        authFetch('/api/master/lembaga'),
+        authFetch('/api/master/asrama'),
+        authFetch('/api/master/tahun-ajaran'),
       ]);
 
       const [lData, aData, taData] = await Promise.all([
@@ -138,7 +156,11 @@ export default function App() {
       const params = new URLSearchParams();
       if (selectedTahunAjaranId) params.set('tahunAjaranId', selectedTahunAjaranId);
 
-      const res = await fetch(`/api/stats?${params.toString()}`);
+      const res = await authFetch(`/api/stats?${params.toString()}`);
+      if (res.status === 401) {
+        setCurrentUser(null);
+        return;
+      }
       const data = await res.json();
       setStats(data);
     } catch (err) {
@@ -169,7 +191,11 @@ export default function App() {
       if (filters.page) params.set('page', String(filters.page));
       if (filters.limit) params.set('limit', String(filters.limit));
 
-      const res = await fetch(`/api/santri?${params.toString()}`);
+      const res = await authFetch(`/api/santri?${params.toString()}`);
+      if (res.status === 401) {
+        setCurrentUser(null);
+        return;
+      }
       const data = await res.json();
 
       setSantriList(data.data || []);
@@ -202,6 +228,7 @@ export default function App() {
 
   // Debounced search / filter / academic year update
   React.useEffect(() => {
+    if (!currentUser || currentUser.mustChangePassword) return;
     const timer = setTimeout(() => {
       fetchSantri();
       fetchStats();
@@ -227,18 +254,12 @@ export default function App() {
     });
   };
 
-  // Logout
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setCurrentUser(null);
-    setShowLoginModal(true);
-  };
 
   // Delete Santri
   const handleDeleteSantri = async (id: string, nama: string) => {
     if (!confirm(`Hapus data santri "${nama}" secara permanen?`)) return;
     try {
-      const res = await fetch(`/api/santri/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/santri/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json();
         alert(err.error || 'Gagal menghapus');
@@ -268,7 +289,7 @@ export default function App() {
   // Batch Status Update
   const handleBatchStatusSubmit = async (status: string) => {
     if (selectedIds.length === 0) return;
-    await fetch('/api/santri/batch-status', {
+    await authFetch('/api/santri/batch-status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds, status }),
@@ -279,6 +300,49 @@ export default function App() {
   };
 
   const isViewer = currentUser?.role === 'viewer';
+
+  // 1. Loading State while checking session
+  if (sessionChecking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+        <div className="w-9 h-9 border-3 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-3" />
+        <p className="text-xs font-semibold text-slate-300">Memeriksa status sesi SIAKAD...</p>
+        <p className="text-[11px] text-slate-500 mt-1">Harap tunggu sejenak</p>
+      </div>
+    );
+  }
+
+  // 2. Mandatory Full-screen Login Page (Strict: No unauthenticated access)
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          if (!user.mustChangePassword) {
+            fetchMasterData();
+            fetchStats();
+            fetchSantri();
+          }
+        }}
+      />
+    );
+  }
+
+  // 3. Mandatory Initial Password Change (Cannot proceed until changed)
+  if (currentUser.mustChangePassword) {
+    return (
+      <ChangePasswordModal
+        user={currentUser}
+        onSuccess={(updatedUser) => {
+          setCurrentUser(updatedUser);
+          fetchMasterData();
+          fetchStats();
+          fetchSantri();
+        }}
+        onLogout={handleLogout}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 selection:bg-emerald-100 selection:text-emerald-900">
@@ -293,7 +357,8 @@ export default function App() {
         onOpenImport={() => setShowImportModal(true)}
         onOpenAddSantri={() => setIsAddingSantri(true)}
         onOpenMasterData={() => setShowMasterModal(true)}
-        onOpenUserManagement={() => setShowUserModal(true)}
+        onOpenUserManagement={() => setActiveTab('users')}
+        onOpenProfile={() => setShowProfileModal(true)}
         onExportExcel={() => setShowExportModal(true)}
         onOpenNaikKelas={() => setShowNaikKelasModal(true)}
         isExporting={isExporting}
@@ -318,7 +383,8 @@ export default function App() {
           onOpenAddSantri={() => setIsAddingSantri(true)}
           onOpenAddStaf={() => setActiveTab('staf')}
           onOpenMasterData={() => setShowMasterModal(true)}
-          onOpenUserManagement={() => setShowUserModal(true)}
+          onOpenUserManagement={() => setActiveTab('users')}
+          onOpenProfile={() => setShowProfileModal(true)}
           onExportExcel={() => setShowExportModal(true)}
           isExporting={isExporting}
           tahunAjaranList={tahunAjarans}
@@ -329,7 +395,7 @@ export default function App() {
           onOpenChangePassword={() => setShowManualChangePassword(true)}
         />
 
-        {/* Main Content Viewport (Fluid Full-Width) */}
+        {/* Main Content Viewport */}
         <main className="flex-1 w-full px-4 md:px-6 py-5">
         
         {/* TAB 1: DATA SANTRI */}
@@ -391,7 +457,16 @@ export default function App() {
           />
         )}
 
-        {/* TAB 4: STATISTIK & ANALISIS */}
+        {/* TAB 4: MANAJEMEN AKUN & HAK AKSES (SUPER ADMIN ONLY) */}
+        {activeTab === 'users' && currentUser.role === 'superadmin' && (
+          <UserManagementView
+            currentUser={currentUser}
+            lembagas={lembagas}
+            asramas={asramas}
+          />
+        )}
+
+        {/* TAB 5: STATISTIK & ANALISIS */}
         {activeTab === 'stats' && (
           <StatsView
             stats={stats}
@@ -406,12 +481,12 @@ export default function App() {
           />
         )}
 
-        {/* TAB 5: LOG AUDIT (SUPER ADMIN) */}
+        {/* TAB 6: LOG AUDIT (SUPER ADMIN) */}
         {activeTab === 'audit' && (
           <AuditLogView currentUser={currentUser} />
         )}
 
-        {/* TAB 6: PANDUAN DEPLOY CLOUDFLARE */}
+        {/* TAB 7: PANDUAN DEPLOY CLOUDFLARE */}
         {activeTab === 'deploy' && (
           <DeployModal />
         )}
@@ -510,25 +585,16 @@ export default function App() {
         />
       )}
 
-      {/* User Management Modal (Superadmin) */}
-      {showUserModal && (
-        <UserManagementModal
-          onClose={() => setShowUserModal(false)}
-          onRefreshParent={() => {
+      {/* Profil Saya Modal */}
+      {showProfileModal && currentUser && (
+        <ProfileModal
+          user={currentUser}
+          lembagas={lembagas}
+          asramas={asramas}
+          onClose={() => setShowProfileModal(false)}
+          onLogout={handleLogout}
+          onPasswordChanged={() => {
             fetchSession();
-          }}
-        />
-      )}
-
-      {/* Login Modal */}
-      {showLoginModal && (
-        <LoginModal
-          onClose={() => setShowLoginModal(false)}
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-            fetchMasterData();
-            fetchStats();
-            fetchSantri();
           }}
         />
       )}
@@ -554,20 +620,15 @@ export default function App() {
         selectedTahunAjaran={tahunAjarans.find((t) => t.id === selectedTahunAjaranId)}
       />
 
-      {/* Password Change Modal */}
-      {currentUser && (currentUser.mustChangePassword || showManualChangePassword) && (
+      {/* Password Change Modal (Manual trigger from profile) */}
+      {currentUser && showManualChangePassword && (
         <ChangePasswordModal
           user={currentUser}
           onSuccess={(updatedUser) => {
             setCurrentUser(updatedUser);
             setShowManualChangePassword(false);
           }}
-          onLogout={async () => {
-            await fetch('/api/auth/logout', { method: 'POST' });
-            setCurrentUser(null);
-            setShowManualChangePassword(false);
-            setShowLoginModal(true);
-          }}
+          onLogout={handleLogout}
         />
       )}
 

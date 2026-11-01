@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, ShieldAlert, CheckCircle, AlertCircle, Eye, EyeOff, LogOut } from 'lucide-react';
 import type { UserSession } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface ChangePasswordModalProps {
   user: UserSession;
@@ -42,7 +43,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       setLoading(true);
       setErrorMsg(null);
 
-      const res = await fetch('/api/auth/change-password', {
+      const res = await authFetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

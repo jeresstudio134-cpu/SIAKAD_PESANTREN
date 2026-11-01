@@ -23,8 +23,8 @@ import {
 import type { UserSession, TahunAjaran } from '../types/index.ts';
 
 interface SidebarProps {
-  activeTab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy';
-  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy') => void;
+  activeTab: 'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy';
+  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy') => void;
   currentUser: UserSession | null;
   onLogout: () => void;
   onOpenQuickLogin: () => void;
@@ -34,6 +34,7 @@ interface SidebarProps {
   onOpenUserManagement: () => void;
   onExportExcel: () => void;
   onOpenNaikKelas: () => void;
+  onOpenProfile?: () => void;
   isExporting: boolean;
   totalSantri?: number;
   isOpenMobile: boolean;
@@ -56,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenUserManagement,
   onExportExcel,
   onOpenNaikKelas,
+  onOpenProfile,
   isExporting,
   totalSantri = 2000,
   isOpenMobile,
@@ -119,7 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
-  const handleTabClick = (tab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy') => {
+  const handleTabClick = (tab: 'santri' | 'staf' | 'asrama' | 'users' | 'stats' | 'audit' | 'deploy') => {
     setActiveTab(tab);
     onCloseMobile();
   };
@@ -364,6 +366,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {isSuperAdmin && (
                   <>
                     <button
+                      onClick={() => handleTabClick('users')}
+                      title="Manajemen Akun & Hak Akses"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                        activeTab === 'users'
+                          ? 'bg-purple-600 text-white shadow-xs shadow-purple-600/30'
+                          : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80'
+                      } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                    >
+                      <Shield className={`w-4 h-4 shrink-0 ${activeTab === 'users' ? 'text-white' : 'text-purple-600'}`} />
+                      {!isCollapsed && <span className="flex-1 text-left truncate">Manajemen Akun</span>}
+                    </button>
+
+                    <button
                       onClick={() => {
                         onCloseMobile();
                         onOpenMasterData();
@@ -375,20 +390,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <Layers className="w-4 h-4 text-blue-600 shrink-0" />
                       {!isCollapsed && <span className="flex-1 text-left truncate">Master Data</span>}
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        onCloseMobile();
-                        onOpenUserManagement();
-                      }}
-                      title="Kelola Pengguna & Hak Akses"
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors ${
-                        isCollapsed ? 'justify-center px-0' : ''
-                      }`}
-                    >
-                      <Shield className="w-4 h-4 text-purple-600 shrink-0" />
-                      {!isCollapsed && <span className="flex-1 text-left truncate">Hak Akses User</span>}
                     </button>
 
                     <button
@@ -426,19 +427,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Bottom Actions Area */}
         <div className="p-3 border-t border-slate-200/80 dark:border-slate-800 space-y-1.5 shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
-          <button
-            onClick={() => {
-              onCloseMobile();
-              onOpenQuickLogin();
-            }}
-            title="Ganti Akun & Simulasi Role"
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700 ${
-              isCollapsed ? 'justify-center px-0' : ''
-            }`}
-          >
-            <UserCheck2 className="w-4 h-4 text-slate-500 shrink-0" />
-            {!isCollapsed && <span className="flex-1 text-left truncate">Ganti Akun / Role</span>}
-          </button>
+          {onOpenProfile && (
+            <button
+              onClick={() => {
+                onCloseMobile();
+                onOpenProfile();
+              }}
+              title="Profil Pengguna & Keamanan"
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-white dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700 ${
+                isCollapsed ? 'justify-center px-0' : ''
+              }`}
+            >
+              <Users className="w-4 h-4 text-emerald-600 shrink-0" />
+              {!isCollapsed && <span className="flex-1 text-left truncate">Profil Saya</span>}
+            </button>
+          )}
+
+          {/* Dev Mode Role Switcher */}
+          {import.meta.env.DEV && (import.meta.env as any).VITE_DEV_MODE === 'true' && (
+            <button
+              onClick={() => {
+                onCloseMobile();
+                onOpenQuickLogin();
+              }}
+              title="[Dev Only] Ganti Akun & Simulasi Role"
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors border border-dashed border-amber-300 dark:border-amber-800 ${
+                isCollapsed ? 'justify-center px-0' : ''
+              }`}
+            >
+              <UserCheck2 className="w-4 h-4 text-amber-500 shrink-0" />
+              {!isCollapsed && <span className="flex-1 text-left truncate">[Dev] Ganti Akun / Role</span>}
+            </button>
+          )}
 
           <button
             onClick={() => {

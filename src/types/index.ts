@@ -268,6 +268,8 @@ export interface UserItem {
   phone?: string | null;
   isActive: number;
   mustChangePassword?: number | boolean;
+  failedLoginCount?: number;
+  lockedUntil?: string | null;
   createdAt: string;
   updatedAt?: string;
 }

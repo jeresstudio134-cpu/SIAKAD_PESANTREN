@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Upload, Download, CheckCircle2, AlertCircle, AlertTriangle, FileSpreadsheet, ShieldCheck, RefreshCw } from 'lucide-react';
 import type { UserSession } from '../types/index.ts';
+import { authFetch } from '../utils/api.ts';
 
 interface ImportExcelModalProps {
   onClose: () => void;
@@ -53,7 +54,7 @@ export const ImportExcelModal: React.FC<ImportExcelModalProps> = ({
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/import/santri', {
+      const res = await authFetch('/api/import/santri', {
         method: 'POST',
         body: formData,
       });
