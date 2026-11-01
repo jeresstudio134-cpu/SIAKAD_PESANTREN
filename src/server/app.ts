@@ -19,6 +19,35 @@ function getDb(c: any) {
   return drizzle(c.env.DB, { schema });
 }
 
+// Helper to resolve effective asrama scope: 'putra' | 'putri' | 'semua'
+export function resolveUserScopeAsrama(user: any): 'putra' | 'putri' | 'semua' {
+  if (!user || user.role === 'superadmin') return 'semua';
+  if (user.scopeAsrama === 'putra' || user.scopeAsrama === 'putri') {
+    return user.scopeAsrama;
+  }
+  const un = (user.username || '').toLowerCase();
+  const fn = (user.fullName || '').toLowerCase();
+  if (un.includes('putra') || fn.includes('putra') || un === 'musyrif_putra') return 'putra';
+  if (un.includes('putri') || fn.includes('putri') || un === 'musyrifah_putri') return 'putri';
+  return 'semua';
+}
+
+// Helper to check if a santri is within the user's authority scope
+export function isSantriInScope(user: any, santri: any): boolean {
+  if (!user || user.role === 'superadmin') return true;
+  const scope = resolveUserScopeAsrama(user);
+  if (scope === 'putra' && santri.jenisKelamin !== 'L') return false;
+  if (scope === 'putri' && santri.jenisKelamin !== 'P') return false;
+
+  if (user.role === 'admin_lembaga' && user.assignedLembagaIds && user.assignedLembagaIds.length > 0) {
+    if (santri.lembagaId && !user.assignedLembagaIds.includes(santri.lembagaId)) return false;
+  }
+  if (user.role === 'pengurus_asrama' && user.assignedAsramaIds && user.assignedAsramaIds.length > 0) {
+    if (santri.asramaId && !user.assignedAsramaIds.includes(santri.asramaId)) return false;
+  }
+  return true;
+}
+
 // Helper to get authenticated user and their scoped permissions
 async function getAuthUser(c: any) {
   const cookieHeader = c.req.header('Cookie');
@@ -36,6 +65,7 @@ async function getAuthUser(c: any) {
       role: schema.users.role,
       assignedLembagaIds: schema.users.assignedLembagaIds,
       assignedAsramaIds: schema.users.assignedAsramaIds,
+      scopeAsrama: schema.users.scopeAsrama,
       phone: schema.users.phone,
       avatarUrl: schema.users.avatarUrl,
       isActive: schema.users.isActive,
@@ -65,6 +95,8 @@ async function getAuthUser(c: any) {
     }
   } catch (e) {}
 
+  const scopeAsrama = resolveUserScopeAsrama(session);
+
   return {
     id: session.userId,
     username: session.username,
@@ -72,6 +104,7 @@ async function getAuthUser(c: any) {
     role: session.role as 'superadmin' | 'admin_lembaga' | 'pengurus_asrama' | 'viewer',
     assignedLembagaIds: lembagaIds,
     assignedAsramaIds: asramaIds,
+    scopeAsrama,
     phone: session.phone,
     avatarUrl: session.avatarUrl,
     mustChangePassword: session.mustChangePassword === 1,
@@ -138,6 +171,7 @@ app.post('/api/auth/login', async (c) => {
         role: user.role,
         assignedLembagaIds: assignedLembaga,
         assignedAsramaIds: assignedAsrama,
+        scopeAsrama: resolveUserScopeAsrama(user),
         phone: user.phone,
         avatarUrl: user.avatarUrl,
         mustChangePassword: user.mustChangePassword === 1,
@@ -199,6 +233,7 @@ app.post('/api/auth/quick-login', async (c) => {
         role: user.role,
         assignedLembagaIds: assignedLembaga,
         assignedAsramaIds: assignedAsrama,
+        scopeAsrama: resolveUserScopeAsrama(user),
         phone: user.phone,
         avatarUrl: user.avatarUrl,
         mustChangePassword: user.mustChangePassword === 1,
@@ -694,8 +729,18 @@ app.delete('/api/master/kelas/:id', async (c) => {
 });
 
 app.get('/api/master/asrama', async (c) => {
+  const user = await getAuthUser(c);
   const db = getDb(c);
-  const rows = await db
+  const scopeAsrama = resolveUserScopeAsrama(user);
+
+  const conds: any[] = [];
+  if (scopeAsrama === 'putra') {
+    conds.push(eq(schema.asrama.kelompokGender, 'Putra'));
+  } else if (scopeAsrama === 'putri') {
+    conds.push(eq(schema.asrama.kelompokGender, 'Putri'));
+  }
+
+  const query = db
     .select({
       id: schema.asrama.id,
       nama: schema.asrama.nama,
@@ -707,7 +752,13 @@ app.get('/api/master/asrama', async (c) => {
       createdAt: schema.asrama.createdAt,
     })
     .from(schema.asrama)
-    .leftJoin(schema.staf, eq(schema.asrama.musyrifStafId, schema.staf.id))
+    .leftJoin(schema.staf, eq(schema.asrama.musyrifStafId, schema.staf.id));
+
+  if (conds.length > 0) {
+    query.where(and(...conds));
+  }
+
+  const rows = await query
     .orderBy(asc(schema.asrama.kelompokGender), asc(schema.asrama.nama))
     .all();
 
@@ -719,10 +770,14 @@ app.get('/api/master/asrama', async (c) => {
         .where(eq(schema.kamar.asramaId, a.id))
         .get();
 
+      const santriConds: any[] = [eq(schema.santri.asramaId, a.id)];
+      if (scopeAsrama === 'putra') santriConds.push(eq(schema.santri.jenisKelamin, 'L'));
+      else if (scopeAsrama === 'putri') santriConds.push(eq(schema.santri.jenisKelamin, 'P'));
+
       const santriCount = await db
         .select({ count: sql<number>`count(*)` })
         .from(schema.santri)
-        .where(eq(schema.santri.asramaId, a.id))
+        .where(and(...santriConds))
         .get();
 
       return {
@@ -761,8 +816,20 @@ app.post('/api/master/asrama', async (c) => {
 });
 
 app.get('/api/master/kamar', async (c) => {
+  const user = await getAuthUser(c);
   const db = getDb(c);
   const asramaId = c.req.query('asramaId');
+  const scopeAsrama = resolveUserScopeAsrama(user);
+
+  const conds: any[] = [];
+  if (asramaId) {
+    conds.push(eq(schema.kamar.asramaId, asramaId));
+  }
+  if (scopeAsrama === 'putra') {
+    conds.push(eq(schema.asrama.kelompokGender, 'Putra'));
+  } else if (scopeAsrama === 'putri') {
+    conds.push(eq(schema.asrama.kelompokGender, 'Putri'));
+  }
 
   const query = db
     .select({
@@ -778,18 +845,22 @@ app.get('/api/master/kamar', async (c) => {
     .from(schema.kamar)
     .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id));
 
-  if (asramaId) {
-    query.where(eq(schema.kamar.asramaId, asramaId));
+  if (conds.length > 0) {
+    query.where(and(...conds));
   }
 
   const rows = await query.orderBy(asc(schema.asrama.nama), asc(schema.kamar.namaKamar)).all();
 
   const formatted = await Promise.all(
     rows.map(async (k) => {
+      const santriConds: any[] = [eq(schema.santri.kamarId, k.id)];
+      if (scopeAsrama === 'putra') santriConds.push(eq(schema.santri.jenisKelamin, 'L'));
+      else if (scopeAsrama === 'putri') santriConds.push(eq(schema.santri.jenisKelamin, 'P'));
+
       const terisi = await db
         .select({ count: sql<number>`count(*)` })
         .from(schema.santri)
-        .where(eq(schema.santri.kamarId, k.id))
+        .where(and(...santriConds))
         .get();
 
       return {
@@ -827,8 +898,39 @@ app.post('/api/master/kamar', async (c) => {
 
 // Daftar Santri Penghuni Kamar
 app.get('/api/kamar/:id/penghuni', async (c) => {
+  const user = await getAuthUser(c);
   const kamarId = c.req.param('id');
   const db = getDb(c);
+
+  const room = await db
+    .select({
+      id: schema.kamar.id,
+      asramaId: schema.kamar.asramaId,
+      kelompokGender: schema.asrama.kelompokGender,
+    })
+    .from(schema.kamar)
+    .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id))
+    .where(eq(schema.kamar.id, kamarId))
+    .get();
+
+  if (!room) {
+    return c.json({ error: 'Kamar tidak ditemukan' }, 404);
+  }
+
+  const scopeAsrama = resolveUserScopeAsrama(user);
+  if (scopeAsrama === 'putra' && room.kelompokGender !== 'Putra') {
+    return c.json({ error: 'Akses ditolak: Kamar ini berada di luar cakupan wewenang Anda (Asrama Putra)' }, 403);
+  }
+  if (scopeAsrama === 'putri' && room.kelompokGender !== 'Putri') {
+    return c.json({ error: 'Akses ditolak: Kamar ini berada di luar cakupan wewenang Anda (Asrama Putri)' }, 403);
+  }
+
+  const conds: any[] = [eq(schema.santri.kamarId, kamarId), isNull(schema.santri.deletedAt)];
+  if (scopeAsrama === 'putra') {
+    conds.push(eq(schema.santri.jenisKelamin, 'L'));
+  } else if (scopeAsrama === 'putri') {
+    conds.push(eq(schema.santri.jenisKelamin, 'P'));
+  }
 
   const santriList = await db
     .select({
@@ -848,7 +950,7 @@ app.get('/api/kamar/:id/penghuni', async (c) => {
       fotoUrl: schema.santri.fotoUrl,
     })
     .from(schema.santri)
-    .where(and(eq(schema.santri.kamarId, kamarId), isNull(schema.santri.deletedAt)))
+    .where(and(...conds))
     .orderBy(asc(schema.santri.namaLengkap))
     .all();
 
@@ -1010,6 +1112,7 @@ app.get('/api/users', async (c) => {
       role: u.role,
       assignedLembagaIds: lembagaIds,
       assignedAsramaIds: asramaIds,
+      scopeAsrama: u.scopeAsrama || 'semua',
       phone: u.phone,
       isActive: u.isActive,
       createdAt: u.createdAt,
@@ -1026,7 +1129,7 @@ app.post('/api/users', async (c) => {
   }
 
   const payload = await c.req.json();
-  const { username, password, fullName, role, assignedLembagaIds, assignedAsramaIds, phone } = payload;
+  const { username, password, fullName, role, assignedLembagaIds, assignedAsramaIds, scopeAsrama, phone } = payload;
 
   if (!username || !password || !fullName || !role) {
     return c.json({ error: 'Username, password, nama lengkap, dan role wajib diisi' }, 400);
@@ -1051,6 +1154,7 @@ app.post('/api/users', async (c) => {
     role,
     assignedLembagaIds: Array.isArray(assignedLembagaIds) ? JSON.stringify(assignedLembagaIds) : null,
     assignedAsramaIds: Array.isArray(assignedAsramaIds) ? JSON.stringify(assignedAsramaIds) : null,
+    scopeAsrama: scopeAsrama || 'semua',
     phone: phone || null,
     isActive: 1,
     createdAt: now,
@@ -1080,6 +1184,10 @@ app.put('/api/users/:id', async (c) => {
     assignedAsramaIds: Array.isArray(payload.assignedAsramaIds) ? JSON.stringify(payload.assignedAsramaIds) : null,
     updatedAt: now,
   };
+
+  if (payload.scopeAsrama !== undefined) {
+    updates.scopeAsrama = payload.scopeAsrama;
+  }
 
   if (payload.password) {
     const { hash, salt } = await hashPassword(payload.password);
@@ -1116,6 +1224,14 @@ function buildScopeEnforcementConditions(user: any) {
     return scopeConditions;
   }
 
+  // Enforce Asrama / Gender Scope strictly on server
+  const scopeAsrama = resolveUserScopeAsrama(user);
+  if (scopeAsrama === 'putra') {
+    scopeConditions.push(eq(schema.santri.jenisKelamin, 'L'));
+  } else if (scopeAsrama === 'putri') {
+    scopeConditions.push(eq(schema.santri.jenisKelamin, 'P'));
+  }
+
   if (user.role === 'admin_lembaga') {
     if (user.assignedLembagaIds && user.assignedLembagaIds.length > 0) {
       scopeConditions.push(inArray(schema.santri.lembagaId, user.assignedLembagaIds));
@@ -1126,8 +1242,6 @@ function buildScopeEnforcementConditions(user: any) {
   } else if (user.role === 'pengurus_asrama') {
     if (user.assignedAsramaIds && user.assignedAsramaIds.length > 0) {
       scopeConditions.push(inArray(schema.santri.asramaId, user.assignedAsramaIds));
-    } else {
-      scopeConditions.push(sql`1 = 0`);
     }
   } else if (user.role === 'viewer') {
     // If viewer has assigned lembaga or asrama, enforce it
@@ -1321,6 +1435,7 @@ app.get('/api/santri', async (c) => {
       totalPages: Math.ceil(total / limit) || 1,
       currentUserScope: user ? {
         role: user.role,
+        scopeAsrama: resolveUserScopeAsrama(user),
         assignedLembagaIds: user.assignedLembagaIds,
         assignedAsramaIds: user.assignedAsramaIds,
       } : null,
@@ -1342,17 +1457,9 @@ app.get('/api/santri/:id', async (c) => {
       return c.json({ error: 'Data santri tidak ditemukan' }, 404);
     }
 
-    // SERVER-SIDE SCOPE CHECK: Ensure user has permission to view this specific santri
-    if (user && user.role !== 'superadmin') {
-      if (user.role === 'admin_lembaga') {
-        if (!data.lembagaId || !user.assignedLembagaIds.includes(data.lembagaId)) {
-          return c.json({ error: 'Akses ditolak: Santri ini di luar lembaga wewenang Anda' }, 403);
-        }
-      } else if (user.role === 'pengurus_asrama') {
-        if (!data.asramaId || !user.assignedAsramaIds.includes(data.asramaId)) {
-          return c.json({ error: 'Akses ditolak: Santri ini di luar asrama wewenang Anda' }, 403);
-        }
-      }
+    // SERVER-SIDE SCOPE CHECK: Strict authority boundary enforcement (403)
+    if (user && !isSantriInScope(user, data)) {
+      return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
     }
 
     const tahfidz = await db
@@ -1452,12 +1559,31 @@ app.post('/api/santri', async (c) => {
     }
 
     // SERVER-SIDE SCOPE ENFORCEMENT:
+    const scopeAsrama = resolveUserScopeAsrama(user);
+    if (scopeAsrama === 'putra') {
+      payload.jenisKelamin = 'L'; // Lock gender to Putra
+    } else if (scopeAsrama === 'putri') {
+      payload.jenisKelamin = 'P'; // Lock gender to Putri
+    }
+
+    if (payload.asramaId) {
+      const asr = await db.select().from(schema.asrama).where(eq(schema.asrama.id, payload.asramaId)).get();
+      if (asr) {
+        if (scopeAsrama === 'putra' && asr.kelompokGender !== 'Putra') {
+          return c.json({ error: 'Akses ditolak: Pengelola Asrama Putra hanya dapat mendaftarkan santri ke Asrama Putra' }, 403);
+        }
+        if (scopeAsrama === 'putri' && asr.kelompokGender !== 'Putri') {
+          return c.json({ error: 'Akses ditolak: Pengelola Asrama Putri hanya dapat mendaftarkan santri ke Asrama Putri' }, 403);
+        }
+      }
+    }
+
     if (user.role === 'admin_lembaga') {
       if (!payload.lembagaId || !user.assignedLembagaIds.includes(payload.lembagaId)) {
         return c.json({ error: 'Akses ditolak: Anda hanya dapat mendaftarkan santri pada lembaga wewenang Anda' }, 403);
       }
     } else if (user.role === 'pengurus_asrama') {
-      if (!payload.asramaId || !user.assignedAsramaIds.includes(payload.asramaId)) {
+      if (user.assignedAsramaIds && user.assignedAsramaIds.length > 0 && (!payload.asramaId || !user.assignedAsramaIds.includes(payload.asramaId))) {
         return c.json({ error: 'Akses ditolak: Anda hanya dapat mendaftarkan santri pada asrama wewenang Anda' }, 403);
       }
     }
@@ -1477,7 +1603,7 @@ app.post('/api/santri', async (c) => {
       nik: payload.nik || null,
       namaLengkap: payload.namaLengkap,
       namaPanggilan: payload.namaPanggilan || null,
-      jenisKelamin: payload.jenisKelamin || 'L',
+      jenisKelamin: payload.jenisKelamin || (scopeAsrama === 'putri' ? 'P' : 'L'),
       tempatLahir: payload.tempatLahir || null,
       tanggalLahir: payload.tanggalLahir || null,
       lembagaId: payload.lembagaId || null,
@@ -1569,13 +1695,28 @@ app.put('/api/santri/:id', async (c) => {
     const existing = await db.select().from(schema.santri).where(eq(schema.santri.id, id)).get();
     if (!existing) return c.json({ error: 'Santri tidak ditemukan' }, 404);
 
-    if (user.role === 'admin_lembaga') {
-      if (!existing.lembagaId || !user.assignedLembagaIds.includes(existing.lembagaId)) {
-        return c.json({ error: 'Akses ditolak: Anda tidak memiliki wewenang mengedit santri di lembaga ini' }, 403);
-      }
-    } else if (user.role === 'pengurus_asrama') {
-      if (!existing.asramaId || !user.assignedAsramaIds.includes(existing.asramaId)) {
-        return c.json({ error: 'Akses ditolak: Anda tidak memiliki wewenang mengedit santri di asrama ini' }, 403);
+    // SERVER-SIDE SCOPE ENFORCEMENT:
+    if (!isSantriInScope(user, existing)) {
+      return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+    }
+
+    const scopeAsrama = resolveUserScopeAsrama(user);
+    if (scopeAsrama === 'putra' && payload.jenisKelamin && payload.jenisKelamin !== 'L') {
+      return c.json({ error: 'Akses ditolak: Pengelola Asrama Putra tidak dapat mengubah santri menjadi Putri' }, 403);
+    }
+    if (scopeAsrama === 'putri' && payload.jenisKelamin && payload.jenisKelamin !== 'P') {
+      return c.json({ error: 'Akses ditolak: Pengelola Asrama Putri tidak dapat mengubah santri menjadi Putra' }, 403);
+    }
+
+    if (payload.asramaId) {
+      const asr = await db.select().from(schema.asrama).where(eq(schema.asrama.id, payload.asramaId)).get();
+      if (asr) {
+        if (scopeAsrama === 'putra' && asr.kelompokGender !== 'Putra') {
+          return c.json({ error: 'Akses ditolak: Asrama ini di luar cakupan wewenang Pengelola Asrama Putra' }, 403);
+        }
+        if (scopeAsrama === 'putri' && asr.kelompokGender !== 'Putri') {
+          return c.json({ error: 'Akses ditolak: Asrama ini di luar cakupan wewenang Pengelola Asrama Putri' }, 403);
+        }
       }
     }
 
@@ -1677,14 +1818,8 @@ app.delete('/api/santri/:id', async (c) => {
     const existing = await db.select().from(schema.santri).where(eq(schema.santri.id, id)).get();
     if (!existing) return c.json({ error: 'Santri tidak ditemukan' }, 404);
 
-    if (user.role === 'admin_lembaga') {
-      if (!existing.lembagaId || !user.assignedLembagaIds.includes(existing.lembagaId)) {
-        return c.json({ error: 'Akses ditolak: Di luar lembaga wewenang Anda' }, 403);
-      }
-    } else if (user.role === 'pengurus_asrama') {
-      if (!existing.asramaId || !user.assignedAsramaIds.includes(existing.asramaId)) {
-        return c.json({ error: 'Akses ditolak: Di luar asrama wewenang Anda' }, 403);
-      }
+    if (!isSantriInScope(user, existing)) {
+      return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
     }
 
     await db.delete(schema.santri).where(eq(schema.santri.id, id));
@@ -1709,22 +1844,17 @@ app.post('/api/santri/batch-status', async (c) => {
 
     const db = getDb(c);
     const now = new Date().toISOString();
+    let updatedCount = 0;
 
     for (const id of ids) {
       const s = await db.select().from(schema.santri).where(eq(schema.santri.id, id)).get();
-      if (!s) continue;
-
-      if (user.role === 'admin_lembaga' && (!s.lembagaId || !user.assignedLembagaIds.includes(s.lembagaId))) {
-        continue; // skip out of scope
-      }
-      if (user.role === 'pengurus_asrama' && (!s.asramaId || !user.assignedAsramaIds.includes(s.asramaId))) {
-        continue;
-      }
+      if (!s || !isSantriInScope(user, s)) continue;
 
       await db.update(schema.santri).set({ status, updatedAt: now }).where(eq(schema.santri.id, id));
+      updatedCount++;
     }
 
-    return c.json({ success: true, count: ids.length });
+    return c.json({ success: true, count: updatedCount });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -2263,7 +2393,18 @@ app.get('/api/stats', async (c) => {
     const santriLResult = await countQuery(eq(schema.santri.jenisKelamin, 'L'));
     const santriPResult = await countQuery(eq(schema.santri.jenisKelamin, 'P'));
 
-    const totalStafResult = await db.select({ count: sql<number>`count(*)` }).from(schema.staf).get();
+    const scopeAsrama = resolveUserScopeAsrama(user);
+    let totalStafCount = 0;
+    if (scopeAsrama === 'putra') {
+      const stafRes = await db.select({ count: sql<number>`count(*)` }).from(schema.staf).where(eq(schema.staf.jenisKelamin, 'L')).get();
+      totalStafCount = stafRes?.count || 0;
+    } else if (scopeAsrama === 'putri') {
+      const stafRes = await db.select({ count: sql<number>`count(*)` }).from(schema.staf).where(eq(schema.staf.jenisKelamin, 'P')).get();
+      totalStafCount = stafRes?.count || 0;
+    } else {
+      const totalStafResult = await db.select({ count: sql<number>`count(*)` }).from(schema.staf).get();
+      totalStafCount = totalStafResult?.count || 0;
+    }
 
     // Jenjang group
     const jenjangQ = db
@@ -2302,7 +2443,9 @@ app.get('/api/stats', async (c) => {
     }
 
     let scopeLabel = 'Semua Lembaga & Asrama (Akses Penuh)';
-    if (user?.role === 'admin_lembaga') scopeLabel = `Cakupan Lembaga (${user.assignedLembagaIds.length} lembaga ditugaskan)`;
+    if (scopeAsrama === 'putra') scopeLabel = 'Pengelola Asrama Putra';
+    else if (scopeAsrama === 'putri') scopeLabel = 'Pengelola Asrama Putri';
+    else if (user?.role === 'admin_lembaga') scopeLabel = `Cakupan Lembaga (${user.assignedLembagaIds.length} lembaga ditugaskan)`;
     else if (user?.role === 'pengurus_asrama') scopeLabel = `Cakupan Asrama (${user.assignedAsramaIds.length} asrama ditugaskan)`;
     else if (user?.role === 'viewer') scopeLabel = 'Viewer (Read-Only Terbatas)';
 
@@ -2311,7 +2454,7 @@ app.get('/api/stats', async (c) => {
       santriAktif: aktifResult?.count ?? 0,
       santriIzinPulang: izinResult?.count ?? 0,
       santriAlpaAtauSkorsing: alpaSkorsingResult?.count ?? 0,
-      totalStaf: totalStafResult?.count ?? 0,
+      totalStaf: totalStafCount,
       totalHafidz30Juz: hafidzResult?.count ?? 0,
       tunggakanSppCount: sppTunggakResult?.count ?? 0,
       santriPutra: santriLResult?.count ?? 0,
@@ -2319,6 +2462,7 @@ app.get('/api/stats', async (c) => {
       jenjangCounts,
       sppCounts,
       asramaCounts,
+      scopeAsrama,
       scopedRole: user?.role || 'superadmin',
       scopeLabel,
     });
@@ -2607,6 +2751,285 @@ app.post('/api/export/custom', async (c) => {
       },
     });
   } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Template Excel Download Endpoint
+app.get('/api/export/template', async (c) => {
+  const user = await getAuthUser(c);
+  const scopeAsrama = resolveUserScopeAsrama(user);
+
+  const sampleRows = [
+    {
+      'NIS': '26001',
+      'NISN': '0098765432',
+      'NIK': '3515082109010001',
+      'Nama Lengkap': 'Muhammad Farhan',
+      'L/P': 'L',
+      'Lembaga': 'SMP Unggulan',
+      'Kelas': 'VII-A',
+      'Asrama': 'Gedung Al-Ghazali',
+      'Kamar': 'Kamar 101',
+      'Status': 'aktif',
+      'SPP': 'lunas',
+      'Target Juz': 30,
+      'Capaian Juz': 12,
+      'Nama Ayah': 'H. Rahmat',
+      'Nama Ibu': 'Siti Maryam',
+      'No HP Wali': '081234567890',
+      'Kota Asal': 'Surabaya',
+    },
+    {
+      'NIS': '26002',
+      'NISN': '0098765433',
+      'NIK': '3515082109010002',
+      'Nama Lengkap': 'Aisyah Humaira',
+      'L/P': 'P',
+      'Lembaga': 'SMP Unggulan',
+      'Kelas': 'VII-B',
+      'Asrama': 'Gedung Khadijah',
+      'Kamar': 'Kamar 201',
+      'Status': 'aktif',
+      'SPP': 'lunas',
+      'Target Juz': 30,
+      'Capaian Juz': 15,
+      'Nama Ayah': 'Ahmad Fauzan',
+      'Nama Ibu': 'Nurul Hidayah',
+      'No HP Wali': '081234567891',
+      'Kota Asal': 'Malang',
+    },
+  ];
+
+  const filteredSamples = scopeAsrama === 'putra'
+    ? sampleRows.filter((r) => r['L/P'] === 'L')
+    : scopeAsrama === 'putri'
+    ? sampleRows.filter((r) => r['L/P'] === 'P')
+    : sampleRows;
+
+  const worksheet = XLSX.utils.json_to_sheet(filteredSamples);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Template Santri');
+  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+  return new Response(buffer, {
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="Template_Import_Santri_SIAKAD.xlsx"',
+    },
+  });
+});
+
+// Import Excel Santri Endpoint with Strict Scope Enforcement
+app.post('/api/import/santri', async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: 'Silakan login terlebih dahulu' }, 401);
+    if (user.role === 'viewer') {
+      return c.json({ error: 'Akses ditolak: Akun Viewer tidak memiliki izin import data' }, 403);
+    }
+
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    if (!file) return c.json({ error: 'File Excel (.xlsx) tidak ditemukan' }, 400);
+
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return c.json({ error: 'Lembar kerja (sheet) tidak ditemukan di file Excel' }, 400);
+
+    const sheet = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json<any>(sheet);
+
+    if (!rawRows || rawRows.length === 0) {
+      return c.json({ error: 'File Excel kosong atau tidak memiliki baris data' }, 400);
+    }
+
+    const db = getDb(c);
+    const scopeAsrama = resolveUserScopeAsrama(user);
+    const scopeLabel = scopeAsrama === 'putra' ? 'Pengelola Asrama Putra' : (scopeAsrama === 'putri' ? 'Pengelola Asrama Putri' : 'Super Admin');
+
+    const activeTA = await db.select().from(schema.tahunAjaran).where(eq(schema.tahunAjaran.isActive, 1)).get();
+    const defaultTAId = activeTA ? activeTA.id : 'ta-2026';
+
+    const allAsramas = await db.select().from(schema.asrama).all();
+    const asramaMap = new Map(allAsramas.map((a) => [a.nama.toLowerCase().trim(), a]));
+
+    let importedCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const errors: string[] = [];
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      const rowNum = i + 2; // Row 1 is header
+
+      const nis = String(row['NIS'] || row['nis'] || row['No Induk'] || '').trim();
+      const nama = String(row['Nama Lengkap'] || row['Nama Santri'] || row['namaLengkap'] || row['Nama'] || '').trim();
+
+      if (!nis || !nama) {
+        skippedCount++;
+        errors.push(`Baris ${rowNum}: Dilewati karena NIS atau Nama Lengkap kosong`);
+        continue;
+      }
+
+      // Normalisasi Jenis Kelamin
+      const rawJk = String(row['L/P'] || row['Jenis Kelamin'] || row['jenisKelamin'] || row['Gender'] || '').toUpperCase().trim();
+      let jk: 'L' | 'P' = 'L';
+      if (rawJk.startsWith('P') || rawJk.includes('PUTRI') || rawJk.includes('PEREMPUAN') || rawJk.includes('WANITA')) {
+        jk = 'P';
+      } else if (rawJk.startsWith('L') || rawJk.includes('PUTRA') || rawJk.includes('LAKI')) {
+        jk = 'L';
+      } else {
+        // Default to scope if available
+        jk = scopeAsrama === 'putri' ? 'P' : 'L';
+      }
+
+      // ENFORCE SERVER-SIDE SCOPE ON GENDER:
+      if (scopeAsrama === 'putra' && jk !== 'L') {
+        skippedCount++;
+        errors.push(`Baris ${rowNum}: Santri "${nama}" (NIS: ${nis}) berjenis kelamin Perempuan (Putri) ditolak karena di luar wewenang ${scopeLabel}.`);
+        continue;
+      }
+      if (scopeAsrama === 'putri' && jk !== 'P') {
+        skippedCount++;
+        errors.push(`Baris ${rowNum}: Santri "${nama}" (NIS: ${nis}) berjenis kelamin Laki-laki (Putra) ditolak karena di luar wewenang ${scopeLabel}.`);
+        continue;
+      }
+
+      // Matching Asrama
+      const rawAsramaName = String(row['Asrama'] || row['asrama'] || row['Asrama & Kamar'] || '').trim();
+      let asramaId: string | null = null;
+      let asramaNama = rawAsramaName || (jk === 'L' ? 'Gedung Al-Ghazali' : 'Gedung Khadijah');
+      for (const [key, val] of asramaMap.entries()) {
+        if (key.includes(rawAsramaName.toLowerCase()) || rawAsramaName.toLowerCase().includes(key)) {
+          asramaId = val.id;
+          asramaNama = val.nama;
+          break;
+        }
+      }
+
+      // Check if Asrama matches account scope
+      if (asramaId) {
+        const asrObj = asramaMap.get(asramaNama.toLowerCase().trim());
+        if (asrObj) {
+          if (scopeAsrama === 'putra' && asrObj.kelompokGender !== 'Putra') {
+            skippedCount++;
+            errors.push(`Baris ${rowNum}: Santri "${nama}" dialokasikan ke asrama putri (${asrObj.nama}) yang melanggar wewenang ${scopeLabel}.`);
+            continue;
+          }
+          if (scopeAsrama === 'putri' && asrObj.kelompokGender !== 'Putri') {
+            skippedCount++;
+            errors.push(`Baris ${rowNum}: Santri "${nama}" dialokasikan ke asrama putra (${asrObj.nama}) yang melanggar wewenang ${scopeLabel}.`);
+            continue;
+          }
+        }
+      }
+
+      const existing = await db.select().from(schema.santri).where(eq(schema.santri.nis, nis)).get();
+
+      if (existing) {
+        if (!isSantriInScope(user, existing)) {
+          skippedCount++;
+          errors.push(`Baris ${rowNum}: Santri "${existing.namaLengkap}" (NIS: ${nis}) sudah ada di sistem tetapi berada di luar wewenang Anda.`);
+          continue;
+        }
+
+        // Update existing santri
+        await db.update(schema.santri).set({
+          namaLengkap: nama,
+          jenisKelamin: jk,
+          jenjang: String(row['Lembaga'] || row['Jenjang'] || existing.jenjang).trim(),
+          kelas: String(row['Kelas'] || row['Kelas / Rombel'] || existing.kelas).trim(),
+          asrama: asramaNama,
+          asramaId: asramaId || existing.asramaId,
+          kamarLabel: String(row['Kamar'] || existing.kamarLabel || '').trim(),
+          status: (String(row['Status'] || existing.status).toLowerCase().trim() as any) || 'aktif',
+          statusSpp: (String(row['SPP'] || row['Status SPP'] || existing.statusSpp).toLowerCase().trim() as any) || 'lunas',
+          capaianJuzHafalan: Number(row['Capaian Juz'] || row['capaianJuzHafalan'] || existing.capaianJuzHafalan) || 0,
+          targetJuzHafalan: Number(row['Target Juz'] || row['targetJuzHafalan'] || existing.targetJuzHafalan) || 30,
+          namaAyah: row['Nama Ayah'] ? String(row['Nama Ayah']).trim() : existing.namaAyah,
+          namaIbu: row['Nama Ibu'] ? String(row['Nama Ibu']).trim() : existing.namaIbu,
+          noHpWali: row['No HP Wali'] || row['HP Wali'] ? String(row['No HP Wali'] || row['HP Wali']).trim() : existing.noHpWali,
+          kotaAsal: row['Kota Asal'] || row['Asal'] ? String(row['Kota Asal'] || row['Asal']).trim() : existing.kotaAsal,
+          updatedAt: now,
+        }).where(eq(schema.santri.id, existing.id));
+
+        updatedCount++;
+      } else {
+        // Insert new santri
+        const newId = 'santri-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+        await db.insert(schema.santri).values({
+          id: newId,
+          nis,
+          nisn: row['NISN'] ? String(row['NISN']).trim() : null,
+          nik: row['NIK'] ? String(row['NIK']).trim() : null,
+          namaLengkap: nama,
+          jenisKelamin: jk,
+          jenjang: String(row['Lembaga'] || row['Jenjang'] || 'SMP').trim(),
+          kelas: String(row['Kelas'] || row['Kelas / Rombel'] || 'VII-A').trim(),
+          asrama: asramaNama,
+          asramaId,
+          kamarLabel: row['Kamar'] ? String(row['Kamar']).trim() : 'Kamar 101',
+          status: (String(row['Status'] || 'aktif').toLowerCase().trim() as any) || 'aktif',
+          statusSpp: (String(row['SPP'] || row['Status SPP'] || 'lunas').toLowerCase().trim() as any) || 'lunas',
+          capaianJuzHafalan: Number(row['Capaian Juz'] || 0) || 0,
+          targetJuzHafalan: Number(row['Target Juz'] || 30) || 30,
+          namaAyah: row['Nama Ayah'] ? String(row['Nama Ayah']).trim() : null,
+          namaIbu: row['Nama Ibu'] ? String(row['Nama Ibu']).trim() : null,
+          noHpWali: row['No HP Wali'] || row['HP Wali'] ? String(row['No HP Wali'] || row['HP Wali']).trim() : null,
+          kotaAsal: row['Kota Asal'] || row['Asal'] ? String(row['Kota Asal'] || row['Asal']).trim() : null,
+          tahunMasuk: '2026',
+          tahunAjaranId: defaultTAId,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        // Riwayat akademik awal
+        await db.insert(schema.riwayatAkademik).values({
+          id: `rw-${defaultTAId}-${newId}`,
+          santriId: newId,
+          tahunAjaranId: defaultTAId,
+          lembagaId: '',
+          jenjang: String(row['Lembaga'] || row['Jenjang'] || 'SMP').trim(),
+          tingkatKelas: String(row['Kelas'] || 'VII-A').split(' ')[0],
+          kelas: String(row['Kelas'] || 'VII-A').trim(),
+          status: 'aktif',
+          catatan: 'Import massal Excel',
+          createdAt: now,
+        });
+
+        importedCount++;
+      }
+    }
+
+    // Catat log audit aktivitas import
+    await db.insert(schema.auditLogs).values({
+      id: 'log-' + Date.now(),
+      userId: user.id,
+      action: 'IMPORT',
+      entityType: 'santri',
+      details: JSON.stringify({
+        totalBaris: rawRows.length,
+        imported: importedCount,
+        updated: updatedCount,
+        skipped: skippedCount,
+        scopeEnforced: scopeLabel,
+      }),
+      createdAt: now,
+    });
+
+    return c.json({
+      success: true,
+      imported: importedCount,
+      updated: updatedCount,
+      skipped: skippedCount,
+      errors,
+      message: `Proses import selesai. ${importedCount} santri baru berhasil ditambahkan, ${updatedCount} data santri diperbarui, ${skippedCount} baris dilewati/ditolak.`,
+    });
+  } catch (err: any) {
+    console.error('Import error:', err);
     return c.json({ error: err.message }, 500);
   }
 });

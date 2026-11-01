@@ -54,7 +54,7 @@ export const DeployModal: React.FC = () => {
   ];
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs max-w-4xl mx-auto space-y-6">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs w-full space-y-6">
       
       {/* Header */}
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">

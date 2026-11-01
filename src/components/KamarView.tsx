@@ -258,17 +258,23 @@ export const KamarView: React.FC<KamarViewProps> = ({
             onChange={(e) => setSelectedAsramaId(e.target.value)}
             className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200"
           >
-            <option value="semua">Semua Asrama</option>
-            <optgroup label="Asrama Putra (Banin)">
-              {asramas.filter((a) => a.kelompokGender === 'Putra').map((a) => (
-                <option key={a.id} value={a.id}>{a.nama}</option>
-              ))}
-            </optgroup>
-            <optgroup label="Asrama Putri (Banat)">
-              {asramas.filter((a) => a.kelompokGender === 'Putri').map((a) => (
-                <option key={a.id} value={a.id}>{a.nama}</option>
-              ))}
-            </optgroup>
+            <option value="semua">
+              {currentUser?.scopeAsrama === 'putra' ? 'Semua Asrama Putra' : currentUser?.scopeAsrama === 'putri' ? 'Semua Asrama Putri' : 'Semua Asrama'}
+            </option>
+            {(currentUser?.scopeAsrama !== 'putri') && (
+              <optgroup label="Asrama Putra (Banin)">
+                {asramas.filter((a) => a.kelompokGender === 'Putra').map((a) => (
+                  <option key={a.id} value={a.id}>{a.nama}</option>
+                ))}
+              </optgroup>
+            )}
+            {(currentUser?.scopeAsrama !== 'putra') && (
+              <optgroup label="Asrama Putri (Banat)">
+                {asramas.filter((a) => a.kelompokGender === 'Putri').map((a) => (
+                  <option key={a.id} value={a.id}>{a.nama}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
 
           {/* Status Filter */}
@@ -314,7 +320,7 @@ export const KamarView: React.FC<KamarViewProps> = ({
           Tidak ada kamar yang sesuai dengan filter pencarian.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full">
           {filteredKamars.map((kamar) => {
             const terisi = kamar.terisiCount || 0;
             const kapasitas = kamar.kapasitas || 10;
@@ -563,26 +569,30 @@ export const KamarView: React.FC<KamarViewProps> = ({
                   required
                 >
                   <option value="">-- Pilih Kamar Tujuan --</option>
-                  <optgroup label="Asrama Putra (Banin)">
-                    {kamars.filter((k) => k.asramaGender === 'Putra').map((k) => {
-                      const sisa = Math.max(0, k.kapasitas - (k.terisiCount || 0));
-                      return (
-                        <option key={k.id} value={k.id} disabled={sisa <= 0 && k.isFull === 1}>
-                          {k.asramaNama} - {k.namaKamar} (Sisa {sisa}/{k.kapasitas} ranjang) {k.isFull === 1 ? '[PENUH]' : ''}
-                        </option>
-                      );
-                    })}
-                  </optgroup>
-                  <optgroup label="Asrama Putri (Banat)">
-                    {kamars.filter((k) => k.asramaGender === 'Putri').map((k) => {
-                      const sisa = Math.max(0, k.kapasitas - (k.terisiCount || 0));
-                      return (
-                        <option key={k.id} value={k.id} disabled={sisa <= 0 && k.isFull === 1}>
-                          {k.asramaNama} - {k.namaKamar} (Sisa {sisa}/{k.kapasitas} ranjang) {k.isFull === 1 ? '[PENUH]' : ''}
-                        </option>
-                      );
-                    })}
-                  </optgroup>
+                  {(currentUser?.scopeAsrama !== 'putri') && (
+                    <optgroup label="Asrama Putra (Banin)">
+                      {kamars.filter((k) => k.asramaGender === 'Putra').map((k) => {
+                        const sisa = Math.max(0, k.kapasitas - (k.terisiCount || 0));
+                        return (
+                          <option key={k.id} value={k.id} disabled={sisa <= 0 && k.isFull === 1}>
+                            {k.asramaNama} - {k.namaKamar} (Sisa {sisa}/{k.kapasitas} ranjang) {k.isFull === 1 ? '[PENUH]' : ''}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {(currentUser?.scopeAsrama !== 'putra') && (
+                    <optgroup label="Asrama Putri (Banat)">
+                      {kamars.filter((k) => k.asramaGender === 'Putri').map((k) => {
+                        const sisa = Math.max(0, k.kapasitas - (k.terisiCount || 0));
+                        return (
+                          <option key={k.id} value={k.id} disabled={sisa <= 0 && k.isFull === 1}>
+                            {k.asramaNama} - {k.namaKamar} (Sisa {sisa}/{k.kapasitas} ranjang) {k.isFull === 1 ? '[PENUH]' : ''}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
                 </select>
               </div>
 

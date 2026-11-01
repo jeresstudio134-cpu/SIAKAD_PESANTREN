@@ -50,11 +50,13 @@ export async function seedDatabase(rawDb: any) {
   const check = rawDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='lembaga'").get();
   if (!check) return;
 
+  rawDb.pragma('foreign_keys = OFF');
   const now = new Date().toISOString();
 
   // Check if initial seeding has already been performed
   const countLembaga = rawDb.prepare('SELECT COUNT(*) as c FROM lembaga').get() as { c: number };
-  if (countLembaga && countLembaga.c > 0) {
+  const countSantri = rawDb.prepare('SELECT COUNT(*) as c FROM santri').get() as { c: number };
+  if (countLembaga && countLembaga.c > 0 && countSantri && countSantri.c > 0) {
     // If master already exists, populate any newly added tables if they are empty
     await seedNewTablesIfNeeded(rawDb, now);
     return;
@@ -64,7 +66,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 1. Seed Tahun Ajaran (Hanya 1 aktif)
   const insertTA = rawDb.prepare(`
-    INSERT INTO tahun_ajaran (id, nama, semester, tanggal_mulai, tanggal_selesai, is_active, created_at, updated_at)
+    INSERT OR IGNORE INTO tahun_ajaran (id, nama, semester, tanggal_mulai, tanggal_selesai, is_active, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   insertTA.run('ta-2026', '2026/2027', 'Ganjil', '2026-07-15', '2026-12-23', 1, now, now);
@@ -73,7 +75,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 2. Seed Master Lembaga
   const insertLembaga = rawDb.prepare(`
-    INSERT INTO lembaga (id, kode, nama, tingkat_kelas, keterangan, created_at, updated_at)
+    INSERT OR IGNORE INTO lembaga (id, kode, nama, tingkat_kelas, keterangan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -147,7 +149,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 3. Seed Master Kelas Terstruktur (Entity Kelas)
   const insertKelas = rawDb.prepare(`
-    INSERT INTO kelas (id, lembaga_id, tingkat, nama_kelas, jurusan, kapasitas, wali_kelas_staf_id, created_at, updated_at)
+    INSERT OR IGNORE INTO kelas (id, lembaga_id, tingkat, nama_kelas, jurusan, kapasitas, wali_kelas_staf_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -169,7 +171,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 4. Seed 45 Staf & Asatidz
   const insertStaf = rawDb.prepare(`
-    INSERT INTO staf (
+    INSERT OR IGNORE INTO staf (
       id, nip, nama_lengkap, jenis_kelamin, tempat_lahir, tanggal_lahir,
       jabatan, bagian, mata_pelajaran_kitab, jenjang_ajar,
       no_hp, email, status_kepegawaian, alamat, pendidikan_terakhir,
@@ -224,7 +226,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 5. Seed Staf Penugasan (Tahun Ajaran 2026/2027)
   const insertPenugasan = rawDb.prepare(`
-    INSERT INTO staf_penugasan (id, staf_id, tahun_ajaran_id, lembaga_id, tugas_mapel, wali_kelas_id, keterangan, created_at, updated_at)
+    INSERT OR IGNORE INTO staf_penugasan (id, staf_id, tahun_ajaran_id, lembaga_id, tugas_mapel, wali_kelas_id, keterangan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -246,12 +248,12 @@ export async function seedDatabase(rawDb: any) {
 
   // 6. Seed Asrama (Putra & Putri) & Kamar
   const insertAsrama = rawDb.prepare(`
-    INSERT INTO asrama (id, nama, kelompok_gender, kapasitas, musyrif_staf_id, keterangan, created_at, updated_at)
+    INSERT OR IGNORE INTO asrama (id, nama, kelompok_gender, kapasitas, musyrif_staf_id, keterangan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertKamar = rawDb.prepare(`
-    INSERT INTO kamar (id, asrama_id, nama_kamar, kapasitas, created_at, updated_at)
+    INSERT OR IGNORE INTO kamar (id, asrama_id, nama_kamar, kapasitas, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
@@ -289,12 +291,12 @@ export async function seedDatabase(rawDb: any) {
   const { hash, salt } = await hashPassword(defaultPassword);
 
   const insertUser = rawDb.prepare(`
-    INSERT INTO users (id, username, password_hash, salt, full_name, role, assigned_lembaga_ids, assigned_asrama_ids, phone, is_active, must_change_password, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    INSERT OR IGNORE INTO users (id, username, password_hash, salt, full_name, role, assigned_lembaga_ids, assigned_asrama_ids, scope_asrama, phone, is_active, must_change_password, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
   `);
 
   const insertScope = rawDb.prepare(`
-    INSERT INTO user_scopes (id, user_id, scope_type, lembaga_id, asrama_id, created_at, updated_at)
+    INSERT OR IGNORE INTO user_scopes (id, user_id, scope_type, lembaga_id, asrama_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -306,6 +308,7 @@ export async function seedDatabase(rawDb: any) {
       role: 'superadmin',
       assignedLembagaIds: null,
       assignedAsramaIds: null,
+      scopeAsrama: 'semua',
       phone: '081234567890',
       scopes: [],
     },
@@ -316,6 +319,7 @@ export async function seedDatabase(rawDb: any) {
       role: 'admin_lembaga',
       assignedLembagaIds: JSON.stringify(['lmb-smp']),
       assignedAsramaIds: null,
+      scopeAsrama: 'semua',
       phone: '081234567891',
       scopes: [{ type: 'lembaga', id: 'lmb-smp' }],
     },
@@ -326,6 +330,7 @@ export async function seedDatabase(rawDb: any) {
       role: 'admin_lembaga',
       assignedLembagaIds: JSON.stringify(['lmb-sma', 'lmb-smk']),
       assignedAsramaIds: null,
+      scopeAsrama: 'semua',
       phone: '081234567892',
       scopes: [{ type: 'lembaga', id: 'lmb-sma' }, { type: 'lembaga', id: 'lmb-smk' }],
     },
@@ -336,16 +341,18 @@ export async function seedDatabase(rawDb: any) {
       role: 'admin_lembaga',
       assignedLembagaIds: JSON.stringify(['lmb-ngaji', 'lmb-diniyah']),
       assignedAsramaIds: null,
+      scopeAsrama: 'semua',
       phone: '081234567893',
       scopes: [{ type: 'lembaga', id: 'lmb-ngaji' }, { type: 'lembaga', id: 'lmb-diniyah' }],
     },
     {
       id: 'usr-5',
       username: 'musyrif_putra',
-      fullName: 'Ust. Dani Hidayat (Pengurus Seluruh Asrama Putra)',
+      fullName: 'Ust. Dani Hidayat (Pengelola Asrama Putra)',
       role: 'pengurus_asrama',
       assignedLembagaIds: null,
       assignedAsramaIds: JSON.stringify(['asr-ptr-1', 'asr-ptr-2', 'asr-ptr-3', 'asr-ptr-4']),
+      scopeAsrama: 'putra',
       phone: '081234567894',
       scopes: [
         { type: 'asrama', id: 'asr-ptr-1' },
@@ -357,10 +364,11 @@ export async function seedDatabase(rawDb: any) {
     {
       id: 'usr-6',
       username: 'musyrifah_putri',
-      fullName: 'Ustzh. Fatimah Azzahra (Pengurus Seluruh Asrama Putri)',
+      fullName: 'Ustzh. Fatimah Azzahra (Pengelola Asrama Putri)',
       role: 'pengurus_asrama',
       assignedLembagaIds: null,
       assignedAsramaIds: JSON.stringify(['asr-pti-1', 'asr-pti-2', 'asr-pti-3']),
+      scopeAsrama: 'putri',
       phone: '081234567895',
       scopes: [
         { type: 'asrama', id: 'asr-pti-1' },
@@ -375,6 +383,7 @@ export async function seedDatabase(rawDb: any) {
       role: 'viewer',
       assignedLembagaIds: JSON.stringify(['lmb-smp']),
       assignedAsramaIds: null,
+      scopeAsrama: 'semua',
       phone: '081234567896',
       scopes: [{ type: 'lembaga', id: 'lmb-smp' }],
     },
@@ -391,6 +400,7 @@ export async function seedDatabase(rawDb: any) {
       u.role,
       u.assignedLembagaIds,
       u.assignedAsramaIds,
+      u.scopeAsrama,
       u.phone,
       mustChange,
       now,
@@ -412,7 +422,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 8. Seed 2.000 Santri, santri_keanggotaan (Multi-Lembaga), & santri_kamar
   const insertSantri = rawDb.prepare(`
-    INSERT INTO santri (
+    INSERT OR IGNORE INTO santri (
       id, nis, nisn, nik, nama_lengkap, nama_panggilan, jenis_kelamin,
       tempat_lahir, tanggal_lahir,
       lembaga_id, asrama_id, kamar_id, tahun_ajaran_id,
@@ -434,22 +444,22 @@ export async function seedDatabase(rawDb: any) {
   `);
 
   const insertKeanggotaan = rawDb.prepare(`
-    INSERT INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
+    INSERT OR IGNORE INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertRiwayat = rawDb.prepare(`
-    INSERT INTO riwayat_akademik (id, santri_id, tahun_ajaran_id, lembaga_id, jenjang, tingkat_kelas, kelas, status, catatan, created_at, updated_at)
+    INSERT OR IGNORE INTO riwayat_akademik (id, santri_id, tahun_ajaran_id, lembaga_id, jenjang, tingkat_kelas, kelas, status, catatan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertSantriKmr = rawDb.prepare(`
-    INSERT INTO santri_kamar (id, santri_id, tahun_ajaran_id, kamar_id, asrama_id, tanggal_mulai, status, created_at, updated_at)
+    INSERT OR IGNORE INTO santri_kamar (id, santri_id, tahun_ajaran_id, kamar_id, asrama_id, tanggal_mulai, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'aktif', ?, ?)
   `);
 
   const insertPenempatan = rawDb.prepare(`
-    INSERT INTO penempatan_kamar (id, santri_id, asrama_id, kamar_id, tahun_ajaran_id, tanggal_mulai, status, created_at, updated_at)
+    INSERT OR IGNORE INTO penempatan_kamar (id, santri_id, asrama_id, kamar_id, tahun_ajaran_id, tanggal_mulai, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'aktif', ?, ?)
   `);
 
@@ -668,7 +678,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 9. Seed Dokumen Santri & Staf (Digital R2 storage metadata)
   const insertDokumen = rawDb.prepare(`
-    INSERT INTO dokumen (id, pemilik_tipe, pemilik_id, jenis, file_key, nama_file, ukuran_bytes, mime_type, uploaded_by, catatan, created_at, updated_at)
+    INSERT OR IGNORE INTO dokumen (id, pemilik_tipe, pemilik_id, jenis, file_key, nama_file, ukuran_bytes, mime_type, uploaded_by, catatan, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -694,7 +704,7 @@ export async function seedDatabase(rawDb: any) {
 
   // 10. Seed Audit Logs
   const insertAudit = rawDb.prepare(`
-    INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details, ip_address, created_at)
+    INSERT OR IGNORE INTO audit_logs (id, user_id, action, entity_type, entity_id, details, ip_address, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -710,6 +720,7 @@ export async function seedDatabase(rawDb: any) {
   console.log('- 2.000 Santri dengan Multi-Lembaga Support (santri_keanggotaan)');
   console.log('- Berkas Dokumen Santri (dokumen)');
   console.log('- Audit Trail Log (audit_logs)');
+  rawDb.pragma('foreign_keys = ON');
 }
 
 async function seedNewTablesIfNeeded(rawDb: any, now: string) {
@@ -719,7 +730,7 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
       console.log('📦 Mengisi Master Kelas & Jurusan baru...');
       const lembagas = rawDb.prepare('SELECT id, kode, tingkat_kelas FROM lembaga').all() as any[];
       const insertKelas = rawDb.prepare(`
-        INSERT INTO kelas (id, lembaga_id, tingkat, nama_kelas, jurusan, kapasitas, wali_kelas_staf_id, created_at, updated_at)
+        INSERT OR IGNORE INTO kelas (id, lembaga_id, tingkat, nama_kelas, jurusan, kapasitas, wali_kelas_staf_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
@@ -736,7 +747,9 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
           else if (clsName.includes('Tahfidz')) jurusan = 'Tahfidz';
 
           const tingkat = clsName.split(' ')[0] || clsName;
-          insertKelas.run(id, l.id, tingkat, clsName, jurusan, 35, `staf-${(idx % 20) + 1}`, now, now);
+          const candidateStaf = `staf-${(idx % 20) + 1}`;
+          const stafExists = rawDb.prepare('SELECT id FROM staf WHERE id = ?').get(candidateStaf);
+          insertKelas.run(id, l.id, tingkat, clsName, jurusan, 35, stafExists ? candidateStaf : null, now, now);
         });
       }
     }
@@ -745,14 +758,14 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     if (!countKeanggotaan || countKeanggotaan.c === 0) {
       console.log('📦 Mengisi santri_keanggotaan (Multi-Lembaga)...');
       rawDb.exec(`
-        INSERT INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
+        INSERT OR IGNORE INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
         SELECT 'kg-' || id, id, tahun_ajaran_id, lembaga_id, NULL, kelas, 'aktif', 'Keanggotaan lembaga reguler', created_at, updated_at
         FROM santri;
       `);
 
       // Multi-Lembaga: santri SMP & SMA juga ikut Ngaji Al-Qur'an
       rawDb.exec(`
-        INSERT INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
+        INSERT OR IGNORE INTO santri_keanggotaan (id, santri_id, tahun_ajaran_id, lembaga_id, kelas_id, kelas_nama, status, catatan, created_at, updated_at)
         SELECT 'kg-ngaji-' || id, id, tahun_ajaran_id, 'lmb-ngaji', NULL, 'Tahfidz Juz 1-5', 'aktif', 'Program Al-Qur''an & Tahfidz', created_at, updated_at
         FROM santri WHERE jenjang IN ('SMP', 'SMA') LIMIT 800;
       `);
@@ -761,7 +774,7 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     const countSantriKamar = rawDb.prepare('SELECT COUNT(*) as c FROM santri_kamar').get() as { c: number };
     if (!countSantriKamar || countSantriKamar.c === 0) {
       rawDb.exec(`
-        INSERT INTO santri_kamar (id, santri_id, tahun_ajaran_id, kamar_id, asrama_id, tanggal_mulai, status, created_at, updated_at)
+        INSERT OR IGNORE INTO santri_kamar (id, santri_id, tahun_ajaran_id, kamar_id, asrama_id, tanggal_mulai, status, created_at, updated_at)
         SELECT id, santri_id, tahun_ajaran_id, kamar_id, asrama_id, tanggal_mulai, status, created_at, created_at
         FROM penempatan_kamar;
       `);
@@ -770,7 +783,7 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     const countPenugasan = rawDb.prepare('SELECT COUNT(*) as c FROM staf_penugasan').get() as { c: number };
     if (!countPenugasan || countPenugasan.c === 0) {
       const insertPenugasan = rawDb.prepare(`
-        INSERT INTO staf_penugasan (id, staf_id, tahun_ajaran_id, lembaga_id, tugas_mapel, keterangan, created_at, updated_at)
+        INSERT OR IGNORE INTO staf_penugasan (id, staf_id, tahun_ajaran_id, lembaga_id, tugas_mapel, keterangan, created_at, updated_at)
         VALUES (?, ?, 'ta-2026', 'lmb-smp', ?, 'SK Penugasan 2026/2027', ?, ?)
       `);
       for (let i = 1; i <= 25; i++) {
@@ -781,7 +794,7 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     const countDokumen = rawDb.prepare('SELECT COUNT(*) as c FROM dokumen').get() as { c: number };
     if (!countDokumen || countDokumen.c === 0) {
       const insertDokumen = rawDb.prepare(`
-        INSERT INTO dokumen (id, pemilik_tipe, pemilik_id, jenis, file_key, nama_file, ukuran_bytes, mime_type, uploaded_by, catatan, created_at, updated_at)
+        INSERT OR IGNORE INTO dokumen (id, pemilik_tipe, pemilik_id, jenis, file_key, nama_file, ukuran_bytes, mime_type, uploaded_by, catatan, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const docTypes = ['Kartu Keluarga (KK)', 'Akta Kelahiran', 'Ijazah Terakhir', 'KTP Orang Tua / Wali'];
@@ -808,7 +821,7 @@ async function seedNewTablesIfNeeded(rawDb: any, now: string) {
     const countScopes = rawDb.prepare('SELECT COUNT(*) as c FROM user_scopes').get() as { c: number };
     if (!countScopes || countScopes.c === 0) {
       rawDb.exec(`
-        INSERT INTO user_scopes (id, user_id, scope_type, lembaga_id, asrama_id, created_at, updated_at)
+        INSERT OR IGNORE INTO user_scopes (id, user_id, scope_type, lembaga_id, asrama_id, created_at, updated_at)
         VALUES
           ('sc-1', 'usr-2', 'lembaga', 'lmb-smp', NULL, '${now}', '${now}'),
           ('sc-2', 'usr-3', 'lembaga', 'lmb-sma', NULL, '${now}', '${now}'),

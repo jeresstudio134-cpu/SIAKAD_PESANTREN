@@ -39,6 +39,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     role: 'admin_lembaga' as Role,
     assignedLembagaIds: [] as string[],
     assignedAsramaIds: [] as string[],
+    scopeAsrama: 'semua' as 'putra' | 'putri' | 'semua',
     phone: '',
   });
 
@@ -80,6 +81,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
       role: 'admin_lembaga',
       assignedLembagaIds: lembagas.length > 0 ? [lembagas[0].id] : [],
       assignedAsramaIds: [],
+      scopeAsrama: 'semua',
       phone: '',
     });
     setShowForm(true);
@@ -94,6 +96,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
       role: user.role,
       assignedLembagaIds: user.assignedLembagaIds || [],
       assignedAsramaIds: user.assignedAsramaIds || [],
+      scopeAsrama: user.scopeAsrama || 'semua',
       phone: user.phone || '',
     });
     setShowForm(true);
@@ -341,6 +344,32 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Scoped Assignment: Cakupan Gender / Asrama */}
+              <div>
+                <label className="block text-[11px] font-medium mb-1">Cakupan Pengelolaan Asrama (Server-Enforced):</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'semua', label: 'Semua Santri & Asrama', desc: 'Putra & Putri' },
+                    { id: 'putra', label: 'Pengelola Asrama Putra', desc: 'Hanya Santri Putra (Banin)' },
+                    { id: 'putri', label: 'Pengelola Asrama Putri', desc: 'Hanya Santri Putri (Banat)' },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setForm({ ...form, scopeAsrama: s.id as any })}
+                      className={`p-2 rounded-lg border text-left text-xs transition-colors ${
+                        form.scopeAsrama === s.id
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 font-semibold text-emerald-900 dark:text-emerald-200'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <span className="block">{s.label}</span>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">{s.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
                 <button

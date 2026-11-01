@@ -122,6 +122,7 @@ export const users = sqliteTable('users', {
   role: text('role').notNull().default('superadmin'), // 'superadmin' | 'admin_lembaga' | 'pengurus_asrama' | 'viewer'
   assignedLembagaIds: text('assigned_lembaga_ids'), // JSON array: ["lembaga-smp"]
   assignedAsramaIds: text('assigned_asrama_ids'), // JSON array: ["asrama-putra-1"]
+  scopeAsrama: text('scope_asrama').notNull().default('semua'), // 'putra' | 'putri' | 'semua'
   avatarUrl: text('avatar_url'),
   phone: text('phone'),
   isActive: integer('is_active').notNull().default(1),

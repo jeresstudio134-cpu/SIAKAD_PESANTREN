@@ -1,4 +1,5 @@
 import React from 'react';
+import { Sidebar } from './components/Sidebar.tsx';
 import { Navbar } from './components/Navbar.tsx';
 import { MobileBottomNav } from './components/MobileBottomNav.tsx';
 import { StatsCards } from './components/StatsCards.tsx';
@@ -72,6 +73,9 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [showMasterModal, setShowMasterModal] = React.useState(false);
   const [showUserModal, setShowUserModal] = React.useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = React.useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+  const [showManualChangePassword, setShowManualChangePassword] = React.useState(false);
 
   // Fetch Current Session
   const fetchSession = async () => {
@@ -265,10 +269,10 @@ export default function App() {
   const isViewer = currentUser?.role === 'viewer';
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 pb-20 md:pb-8 selection:bg-emerald-100 selection:text-emerald-900">
+    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 selection:bg-emerald-100 selection:text-emerald-900">
       
-      {/* 1. Top Navbar */}
-      <Navbar
+      {/* 1. Dashboard Sidebar Menu */}
+      <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentUser={currentUser}
@@ -276,19 +280,45 @@ export default function App() {
         onOpenQuickLogin={() => setShowLoginModal(true)}
         onOpenImport={() => setShowImportModal(true)}
         onOpenAddSantri={() => setIsAddingSantri(true)}
-        onOpenAddStaf={() => setActiveTab('staf')}
         onOpenMasterData={() => setShowMasterModal(true)}
         onOpenUserManagement={() => setShowUserModal(true)}
         onExportExcel={() => setShowExportModal(true)}
+        onOpenNaikKelas={() => setShowNaikKelasModal(true)}
         isExporting={isExporting}
+        totalSantri={stats?.totalSantri || totalSantri}
+        isOpenMobile={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         tahunAjaranList={tahunAjarans}
         selectedTahunAjaranId={selectedTahunAjaranId}
-        onSelectTahunAjaran={(id) => setSelectedTahunAjaranId(id)}
-        onOpenNaikKelas={() => setShowNaikKelasModal(true)}
       />
 
-      {/* 2. Main Content Viewport */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 py-5">
+      {/* 2. Main Page Container (Header + Content) */}
+      <div className="flex-1 flex flex-col min-w-0 pb-20 md:pb-8">
+        <Navbar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onOpenQuickLogin={() => setShowLoginModal(true)}
+          onOpenImport={() => setShowImportModal(true)}
+          onOpenAddSantri={() => setIsAddingSantri(true)}
+          onOpenAddStaf={() => setActiveTab('staf')}
+          onOpenMasterData={() => setShowMasterModal(true)}
+          onOpenUserManagement={() => setShowUserModal(true)}
+          onExportExcel={() => setShowExportModal(true)}
+          isExporting={isExporting}
+          tahunAjaranList={tahunAjarans}
+          selectedTahunAjaranId={selectedTahunAjaranId}
+          onSelectTahunAjaran={(id) => setSelectedTahunAjaranId(id)}
+          onOpenNaikKelas={() => setShowNaikKelasModal(true)}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+          onOpenChangePassword={() => setShowManualChangePassword(true)}
+        />
+
+        {/* Main Content Viewport (Fluid Full-Width) */}
+        <main className="flex-1 w-full px-4 md:px-6 py-5">
         
         {/* TAB 1: DATA SANTRI */}
         {activeTab === 'santri' && (
@@ -375,6 +405,7 @@ export default function App() {
         )}
 
       </main>
+      </div>
 
       {/* 3. Mobile Fixed Bottom Navigation */}
       <MobileBottomNav
@@ -409,6 +440,7 @@ export default function App() {
           asramas={asramas}
           tahunAjarans={tahunAjarans}
           selectedTahunAjaranId={selectedTahunAjaranId}
+          currentUser={currentUser}
           onClose={() => {
             setIsAddingSantri(false);
             setEditingSantri(null);
@@ -443,6 +475,7 @@ export default function App() {
       {/* Import Excel Modal */}
       {showImportModal && !isViewer && (
         <ImportExcelModal
+          currentUser={currentUser}
           onClose={() => setShowImportModal(false)}
           onSuccess={() => {
             setShowImportModal(false);
@@ -508,16 +541,18 @@ export default function App() {
         selectedTahunAjaran={tahunAjarans.find((t) => t.id === selectedTahunAjaranId)}
       />
 
-      {/* Forced Password Change Modal for initial Superadmin */}
-      {currentUser && currentUser.mustChangePassword && (
+      {/* Password Change Modal */}
+      {currentUser && (currentUser.mustChangePassword || showManualChangePassword) && (
         <ChangePasswordModal
           user={currentUser}
           onSuccess={(updatedUser) => {
             setCurrentUser(updatedUser);
+            setShowManualChangePassword(false);
           }}
           onLogout={async () => {
             await fetch('/api/auth/logout', { method: 'POST' });
             setCurrentUser(null);
+            setShowManualChangePassword(false);
             setShowLoginModal(true);
           }}
         />

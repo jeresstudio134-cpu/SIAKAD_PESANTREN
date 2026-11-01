@@ -1,6 +1,6 @@
 import React from 'react';
-import { X, Save, AlertCircle } from 'lucide-react';
-import type { Santri, Lembaga, Asrama, Kamar, TahunAjaran } from '../types/index.ts';
+import { X, Save, AlertCircle, Lock } from 'lucide-react';
+import type { Santri, Lembaga, Asrama, Kamar, TahunAjaran, UserSession } from '../types/index.ts';
 
 interface SantriFormModalProps {
   initialData?: Santri | null;
@@ -10,6 +10,7 @@ interface SantriFormModalProps {
   asramas: Asrama[];
   tahunAjarans?: TahunAjaran[];
   selectedTahunAjaranId?: string;
+  currentUser?: UserSession | null;
 }
 
 export const SantriFormModal: React.FC<SantriFormModalProps> = ({
@@ -20,6 +21,7 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
   asramas,
   tahunAjarans = [],
   selectedTahunAjaranId = '',
+  currentUser,
 }) => {
   const isEdit = !!initialData;
   const [submitting, setSubmitting] = React.useState(false);
@@ -27,8 +29,13 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
 
   const [kamars, setKamars] = React.useState<Kamar[]>([]);
 
+  const isScopePutra = currentUser?.scopeAsrama === 'putra';
+  const isScopePutri = currentUser?.scopeAsrama === 'putri';
+  const initialGender = isScopePutra ? 'L' : isScopePutri ? 'P' : (initialData?.jenisKelamin || 'L');
+
   const defaultLembaga = lembagas[0]?.id || '';
-  const defaultAsrama = asramas[0]?.id || '';
+  const initialValidAsramas = asramas.filter((a) => a.kelompokGender === (initialGender === 'L' ? 'Putra' : 'Putri'));
+  const defaultAsrama = initialData?.asramaId || initialValidAsramas[0]?.id || asramas[0]?.id || '';
   const activeTA = tahunAjarans.find((t) => t.isActive === 1);
   const defaultTAId = initialData?.tahunAjaranId || selectedTahunAjaranId || (activeTA ? activeTA.id : 'ta-2026');
 
@@ -38,7 +45,7 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
     nik: initialData?.nik || '',
     namaLengkap: initialData?.namaLengkap || '',
     namaPanggilan: initialData?.namaPanggilan || '',
-    jenisKelamin: initialData?.jenisKelamin || 'L',
+    jenisKelamin: initialGender,
     tempatLahir: initialData?.tempatLahir || '',
     tanggalLahir: initialData?.tanggalLahir || '2010-01-01',
     
@@ -224,16 +231,22 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
                 />
               </div>
               <div>
-                <label className="block text-slate-600 dark:text-slate-300 font-medium mb-1">
-                  Jenis Kelamin*:
+                <label className="block text-slate-600 dark:text-slate-300 font-medium mb-1 flex items-center justify-between">
+                  <span>Jenis Kelamin*:</span>
+                  {(isScopePutra || isScopePutri) && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5">
+                      <Lock className="w-2.5 h-2.5" /> Terkunci
+                    </span>
+                  )}
                 </label>
                 <select
-                  value={formData.jenisKelamin}
+                  value={isScopePutra ? 'L' : isScopePutri ? 'P' : formData.jenisKelamin}
+                  disabled={isScopePutra || isScopePutri}
                   onChange={(e) => handleGenderChange(e.target.value as 'L' | 'P')}
-                  className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 font-semibold"
+                  className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 font-semibold disabled:opacity-75 disabled:bg-slate-100 dark:disabled:bg-slate-800/80"
                 >
-                  <option value="L">Putra (Laki-laki)</option>
-                  <option value="P">Putri (Perempuan)</option>
+                  {!isScopePutri && <option value="L">Putra (Laki-laki)</option>}
+                  {!isScopePutra && <option value="P">Putri (Perempuan)</option>}
                 </select>
               </div>
               <div>

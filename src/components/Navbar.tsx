@@ -1,12 +1,8 @@
 import React from 'react';
 import { 
+  Menu,
   GraduationCap, 
-  Users, 
-  UserCheck, 
-  BarChart3, 
-  Cloud, 
   Download, 
-  Upload, 
   LogOut, 
   User, 
   ChevronDown,
@@ -16,7 +12,13 @@ import {
   Building2,
   Home,
   Calendar,
-  ShieldAlert
+  Sparkles,
+  KeyRound,
+  Users,
+  UserCheck,
+  BarChart3,
+  ShieldAlert,
+  Cloud
 } from 'lucide-react';
 import type { UserSession, TahunAjaran } from '../types/index.ts';
 
@@ -37,17 +39,16 @@ interface NavbarProps {
   selectedTahunAjaranId: string;
   onSelectTahunAjaran: (id: string) => void;
   onOpenNaikKelas: () => void;
+  onOpenMobileSidebar?: () => void;
+  onOpenChangePassword?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
-  setActiveTab,
   currentUser,
   onLogout,
   onOpenQuickLogin,
-  onOpenImport,
   onOpenAddSantri,
-  onOpenAddStaf,
   onOpenMasterData,
   onOpenUserManagement,
   onExportExcel,
@@ -56,8 +57,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   selectedTahunAjaranId,
   onSelectTahunAjaran,
   onOpenNaikKelas,
+  onOpenMobileSidebar,
+  onOpenChangePassword,
 }) => {
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
 
   const isSuperAdmin = currentUser?.role === 'superadmin';
   const isViewer = currentUser?.role === 'viewer';
@@ -65,11 +69,82 @@ export const Navbar: React.FC<NavbarProps> = ({
   const selectedYear = tahunAjaranList.find((t) => t.id === selectedTahunAjaranId);
   const isSelectedYearActive = selectedYear ? selectedYear.isActive === 1 : true;
 
+  // Close dropdown on click outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getTabInfo = () => {
+    switch (activeTab) {
+      case 'santri':
+        return {
+          title: 'Data Santri',
+          desc: 'Manajemen & pemantauan data santri multi-lembaga',
+          icon: Users,
+        };
+      case 'staf':
+        return {
+          title: 'Staf & Asatidz',
+          desc: 'Pengajar, asatidz, pembina & penugasan akademik',
+          icon: UserCheck,
+        };
+      case 'asrama':
+        return {
+          title: 'Asrama & Kamar',
+          desc: 'Alokasi gedung asrama, kapasitas & penghuni kamar',
+          icon: Home,
+        };
+      case 'stats':
+        return {
+          title: 'Statistik & Analisis',
+          desc: 'Grafik sebaran santri, kepatuhan SPP & hafalan Al-Qur\'an',
+          icon: BarChart3,
+        };
+      case 'audit':
+        return {
+          title: 'Log Audit Keamanan',
+          desc: 'Jejak mutasi data & riwayat aktivitas administrator',
+          icon: ShieldAlert,
+        };
+      case 'deploy':
+        return {
+          title: 'Panduan Deploy Edge',
+          desc: 'Arsitektur Cloudflare Workers, D1 Database & R2 Storage',
+          icon: Cloud,
+        };
+    }
+  };
+
+  const currentTabInfo = getTabInfo();
+  const TabIcon = currentTabInfo.icon;
+
   const getRoleBadge = () => {
     if (!currentUser) return null;
+    if (currentUser.scopeAsrama === 'putra') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 whitespace-nowrap">
+          <Home className="w-3 h-3" />
+          <span>Pengelola Asrama Putra</span>
+        </span>
+      );
+    }
+    if (currentUser.scopeAsrama === 'putri') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-100 text-pink-800 dark:bg-pink-950/70 dark:text-pink-300 whitespace-nowrap">
+          <Home className="w-3 h-3" />
+          <span>Pengelola Asrama Putri</span>
+        </span>
+      );
+    }
     if (currentUser.role === 'superadmin') {
       return (
-        <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 whitespace-nowrap">
           <Shield className="w-3 h-3" />
           <span>Super Admin</span>
         </span>
@@ -77,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
     if (currentUser.role === 'admin_lembaga') {
       return (
-        <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 whitespace-nowrap">
           <Building2 className="w-3 h-3" />
           <span>Admin Lembaga</span>
         </span>
@@ -85,153 +160,64 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
     if (currentUser.role === 'pengurus_asrama') {
       return (
-        <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 whitespace-nowrap">
           <Home className="w-3 h-3" />
           <span>Pengurus Asrama</span>
         </span>
       );
     }
     return (
-      <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 whitespace-nowrap">
         Viewer (Read-Only)
       </span>
     );
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between gap-4 md:gap-6 h-16">
+    <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="px-4 md:px-6 w-full flex items-center justify-between gap-3 h-16">
         
-        {/* Zone 1: Single Element Brand Wordmark + Scoped Role Badge */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm shadow-emerald-600/20">
-            <GraduationCap className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-900 dark:text-white tracking-tight text-base sm:text-lg whitespace-nowrap">
-                SIAKAD Pesantren
-              </span>
-              {getRoleBadge()}
+        {/* Left: Mobile Sidebar Trigger + Page Title & Icon */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onOpenMobileSidebar}
+            className="md:hidden p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 rounded-lg transition-colors"
+            aria-label="Buka Menu Sidebar"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="hidden sm:flex w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 items-center justify-center shrink-0">
+              <TabIcon className="w-4 h-4" />
             </div>
-            <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium -mt-0.5 hidden sm:inline">
-              Cloudflare D1 & R2 Serverless Edge
-            </span>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate leading-tight">
+                  {currentTabInfo.title}
+                </h1>
+                <div className="hidden sm:block">
+                  {getRoleBadge()}
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate hidden md:block">
+                {currentTabInfo.desc}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Zone 2: Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1">
-          <button
-            onClick={() => setActiveTab('santri')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-              activeTab === 'santri'
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Data Santri</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('staf')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-              activeTab === 'staf'
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Staf & Asatidz</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('asrama')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-              activeTab === 'asrama'
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>Asrama & Kamar</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('stats')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-              activeTab === 'stats'
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>Statistik</span>
-          </button>
-
-          {/* Super Admin Log Audit */}
-          {isSuperAdmin && (
-            <button
-              onClick={() => setActiveTab('audit')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-                activeTab === 'audit'
-                  ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
-              <span>Log Audit</span>
-            </button>
-          )}
-
-          {/* Super Admin Special Master Data Buttons */}
-          {isSuperAdmin && (
-            <>
-              <button
-                onClick={onOpenMasterData}
-                title="Kelola Lembaga, Asrama & Kamar"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                <Layers className="w-3.5 h-3.5 text-blue-600" />
-                <span>Master Data</span>
-              </button>
-
-              <button
-                onClick={onOpenUserManagement}
-                title="Kelola Pengguna & Hak Akses Scoped"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                <Shield className="w-3.5 h-3.5 text-purple-600" />
-                <span>Kelola Pengguna</span>
-              </button>
-            </>
-          )}
-
-          <button
-            onClick={() => setActiveTab('deploy')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
-              activeTab === 'deploy'
-                ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>Panduan Deploy</span>
-          </button>
-        </nav>
-
-        {/* Zone 3: Actions & User Session */}
+        {/* Right: Academic Year Selector + Quick Actions + User Dropdown */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           
-          {/* Selector Tahun Ajaran (Semua Tampilan Default Memakai TA Aktif, Dropdown untuk melihat tahun lain) */}
+          {/* Selector Tahun Ajaran */}
           <div className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700/80 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors">
             <Calendar className={`w-3.5 h-3.5 shrink-0 ${isSelectedYearActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`} />
             <select
               value={selectedTahunAjaranId}
               onChange={(e) => onSelectTahunAjaran(e.target.value)}
               className="bg-transparent text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer pr-1"
-              title="Pilih Tahun Ajaran yang ingin ditampilkan di sistem"
+              title="Pilih Tahun Ajaran yang aktif atau rekaman arsip"
             >
               {tahunAjaranList.map((ta) => (
                 <option key={ta.id} value={ta.id} className="text-slate-900 bg-white dark:bg-slate-800 dark:text-white">
@@ -241,26 +227,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </select>
           </div>
 
-          {/* Action: Naik Kelas Massal (Superadmin & Admin Lembaga) */}
-          {!isViewer && (
-            <button
-              onClick={onOpenNaikKelas}
-              title="Proses Akhir Tahun / Naik Kelas Massal (Fitur Wajib)"
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors whitespace-nowrap"
-            >
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Naik Kelas</span>
-            </button>
-          )}
-
-          {/* Action: Tambah Santri (if not viewer) */}
+          {/* Action: Tambah Santri Baru (when on santri tab and not viewer) */}
           {!isViewer && activeTab === 'santri' && (
             <button
               onClick={onOpenAddSantri}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs shadow-emerald-600/30 transition-colors whitespace-nowrap"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Santri Baru</span>
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span className="hidden sm:inline">Santri Baru</span>
             </button>
           )}
 
@@ -268,64 +242,45 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onExportExcel}
             disabled={isExporting}
-            title="Download Rekap Excel (.xlsx) Sesuai Cakupan Wewenang"
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
+            title="Download Rekap Excel (.xlsx)"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-600" />
-            <span className="hidden sm:inline">{isExporting ? 'Proses...' : 'Export Excel'}</span>
+            <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden lg:inline">{isExporting ? 'Memproses...' : 'Export Excel'}</span>
           </button>
 
-          {/* Action: Import Excel (non viewer) */}
-          {!isViewer && activeTab === 'santri' && (
-            <button
-              onClick={onOpenImport}
-              title="Import Data Santri dari Excel"
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 rounded-lg transition-colors whitespace-nowrap"
-            >
-              <Upload className="w-3.5 h-3.5 text-blue-600" />
-              <span>Import</span>
-            </button>
-          )}
-
           {/* User Account Dropdown */}
-          <div className="relative">
+          <div className="relative" ref={dropdownRef}>
             {currentUser ? (
               <div>
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  aria-label="Menu Pengguna"
                 >
-                  <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center text-xs font-bold uppercase">
+                  <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 flex items-center justify-center text-xs font-bold uppercase shrink-0">
                     {currentUser.fullName.charAt(0)}
                   </div>
-                  <div className="text-left hidden md:block max-w-[130px] truncate">
+                  <div className="text-left hidden lg:block max-w-[120px] truncate">
                     <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
                       {currentUser.fullName}
-                    </p>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">
-                      {currentUser.role.replace(/_/g, ' ')}
                     </p>
                   </div>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
 
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95">
-                    <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95">
+                    <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800">
                       <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
                         {currentUser.fullName}
                       </p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Username: @{currentUser.username}
+                        @{currentUser.username}
                       </p>
-                      <p className="text-[10px] text-emerald-600 font-medium capitalize mt-0.5">
-                        Role: {currentUser.role.replace(/_/g, ' ')}
-                      </p>
-                      {currentUser.role !== 'superadmin' && (
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 italic">
-                          Cakupan data dipaksa di sisi server Cloudflare
-                        </p>
-                      )}
+                      <div className="mt-1.5">
+                        {getRoleBadge()}
+                      </div>
                     </div>
 
                     <div className="py-1">
@@ -339,7 +294,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             className="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                           >
                             <Layers className="w-3.5 h-3.5 text-blue-500" />
-                            <span>Master Lembaga & Asrama</span>
+                            <span>Master Data Lembaga & Asrama</span>
                           </button>
 
                           <button
@@ -355,6 +310,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </>
                       )}
 
+                      {!isViewer && (
+                        <button
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            onOpenNaikKelas();
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Kenaikan Kelas Massal</span>
+                        </button>
+                      )}
+
+                      {onOpenChangePassword && (
+                        <button
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            onOpenChangePassword();
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Ubah Kata Sandi</span>
+                        </button>
+                      )}
+
                       <button
                         onClick={() => {
                           setUserMenuOpen(false);
@@ -362,9 +343,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                         }}
                         className="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                       >
-                        <User className="w-3.5 h-3.5 text-slate-400" />
+                        <User className="w-3.5 h-3.5 text-emerald-500" />
                         <span>Ganti Akun & Simulasi Role</span>
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
 
                       <button
                         onClick={() => {
@@ -395,12 +378,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Banner Riwayat/Arsip jika melihat Tahun Ajaran non-aktif */}
       {selectedYear && !selectedYear.isActive && (
-        <div className="bg-amber-500/10 border-t border-amber-500/20 px-4 sm:px-6 py-2 text-xs text-amber-900 dark:text-amber-200">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="bg-amber-500/10 border-t border-amber-500/20 px-4 md:px-6 py-2 text-xs text-amber-900 dark:text-amber-200 w-full">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
               <span>
-                <strong>Mode Arsip / Riwayat:</strong> Anda sedang memantau data <strong>Tahun Ajaran {selectedYear.nama} ({selectedYear.semester})</strong>. Seluruh kelas, jenjang, dan asrama disesuaikan dengan rekaman arsip tahun tersebut.
+                <strong>Mode Arsip / Riwayat:</strong> Anda sedang memantau data <strong>Tahun Ajaran {selectedYear.nama} ({selectedYear.semester})</strong>.
               </span>
             </div>
             <button

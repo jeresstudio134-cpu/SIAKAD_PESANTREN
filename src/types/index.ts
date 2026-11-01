@@ -244,6 +244,7 @@ export interface UserSession {
   role: Role;
   assignedLembagaIds: string[];
   assignedAsramaIds: string[];
+  scopeAsrama?: 'putra' | 'putri' | 'semua';
   phone?: string | null;
   avatarUrl?: string | null;
   scopeSummary?: string;
@@ -257,6 +258,7 @@ export interface UserItem {
   role: Role;
   assignedLembagaIds: string[];
   assignedAsramaIds: string[];
+  scopeAsrama?: 'putra' | 'putri' | 'semua';
   phone?: string | null;
   isActive: number;
   mustChangePassword?: number | boolean;
@@ -317,6 +319,7 @@ export interface DashboardStats {
   jenjangCounts: Record<string, number>;
   sppCounts: Record<string, number>;
   asramaCounts: Record<string, number>;
+  scopeAsrama?: 'putra' | 'putri' | 'semua';
   scopedRole?: Role;
   scopeLabel?: string;
 }

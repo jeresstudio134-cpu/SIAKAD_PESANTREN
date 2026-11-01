@@ -273,7 +273,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ currentUser }) => {
                         {log.entityType}
                       </td>
                       <td className="py-3 px-4">
-                        <span className="text-slate-600 dark:text-slate-300 text-xs truncate block max-w-md">
+                        <span className="text-slate-600 dark:text-slate-300 text-xs truncate block max-w-xl xl:max-w-3xl">
                           {parsedSummary || '-'}
                         </span>
                       </td>

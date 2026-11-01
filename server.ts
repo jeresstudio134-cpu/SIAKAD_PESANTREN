@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const server = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = 3000;
 
   console.log('🚀 Menginisialisasi SIAKAD Pesantren Engine...');
 
@@ -46,6 +46,11 @@ async function startServer() {
   safeAddCol('kamar', 'is_full', 'INTEGER NOT NULL DEFAULT 0');
   safeAddCol('users', 'deleted_at', 'TEXT');
   safeAddCol('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
+  safeAddCol('users', 'scope_asrama', "TEXT NOT NULL DEFAULT 'semua'");
+  try {
+    sqliteDb.exec("UPDATE users SET scope_asrama = 'putra' WHERE username LIKE '%putra%' OR id = 'usr-5';");
+    sqliteDb.exec("UPDATE users SET scope_asrama = 'putri' WHERE username LIKE '%putri%' OR id = 'usr-6';");
+  } catch (e) {}
   safeAddCol('riwayat_akademik', 'updated_at', "TEXT NOT NULL DEFAULT ''");
   safeAddCol('riwayat_akademik', 'deleted_at', 'TEXT');
   safeAddCol('penempatan_kamar', 'updated_at', "TEXT NOT NULL DEFAULT ''");
@@ -130,7 +135,7 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     server.use(vite.middlewares);

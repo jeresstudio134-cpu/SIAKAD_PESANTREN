@@ -17,7 +17,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
 }) => {
   if (loading || !stats) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 mb-6 w-full">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="h-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 animate-pulse">
             <div className="w-12 h-3 bg-slate-200 dark:bg-slate-800 rounded mb-3"></div>
@@ -28,11 +28,26 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
     );
   }
 
+  const isPutra = stats.scopeAsrama === 'putra';
+  const isPutri = stats.scopeAsrama === 'putri';
+
+  const totalSantriSubtitle = isPutra
+    ? `${stats.totalSantri.toLocaleString('id-ID')} Santri Putra (Banin)`
+    : isPutri
+    ? `${stats.totalSantri.toLocaleString('id-ID')} Santri Putri (Banat)`
+    : `${stats.santriPutra.toLocaleString('id-ID')} Putra · ${stats.santriPutri.toLocaleString('id-ID')} Putri`;
+
+  const stafSubtitle = isPutra
+    ? 'Musyrif & Asatidz Putra'
+    : isPutri
+    ? 'Musyrifah & Ustadzah Putri'
+    : 'Pengajar & Pengasuh';
+
   const cards = [
     {
       title: 'Total Santri',
       value: stats.totalSantri.toLocaleString('id-ID'),
-      subtitle: `${stats.santriPutra} Putra · ${stats.santriPutri} Putri`,
+      subtitle: totalSantriSubtitle,
       icon: Users,
       color: 'text-emerald-700 dark:text-emerald-400',
       bgColor: 'bg-emerald-50 dark:bg-emerald-950/40',
@@ -82,7 +97,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
     {
       title: 'Staf & Asatidz',
       value: stats.totalStaf.toLocaleString('id-ID'),
-      subtitle: 'Pengajar & Pengasuh',
+      subtitle: stafSubtitle,
       icon: BookOpen,
       color: 'text-indigo-700 dark:text-indigo-400',
       bgColor: 'bg-indigo-50 dark:bg-indigo-950/40',
@@ -92,8 +107,8 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
   ];
 
   return (
-    <section aria-label="Ringkasan Statistik Pesantren" className="mb-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+    <section aria-label="Ringkasan Statistik Pesantren" className="mb-6 w-full">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 w-full">
         {cards.map((c, i) => {
           const Icon = c.icon;
           return (

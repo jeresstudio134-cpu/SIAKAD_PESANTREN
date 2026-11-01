@@ -137,6 +137,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     filters.kotaAsal,
   ].filter(Boolean).length;
 
+  const isScopePutra = currentUser?.scopeAsrama === 'putra';
+  const isScopePutri = currentUser?.scopeAsrama === 'putri';
+
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 mb-5 shadow-xs space-y-3">
       
@@ -147,13 +150,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <Lock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
             <span>
               <strong>Server-Side Scoped RBAC Aktif:</strong>{' '}
-              {currentUser.role === 'admin_lembaga' && 'Query dibatasi khusus pada Lembaga yang ditugaskan kepada Anda.'}
-              {currentUser.role === 'pengurus_asrama' && 'Query dibatasi khusus pada Asrama binaan yang ditugaskan kepada Anda.'}
-              {currentUser.role === 'viewer' && 'Akun Viewer (Hanya Lihat) dengan cakupan terbatas.'}
+              {isScopePutra && 'Wewenang Pengelola Asrama Putra aktif. Seluruh data & pencarian dibatasi otomatis hanya untuk santri Putra dan asrama putra.'}
+              {isScopePutri && 'Wewenang Pengelola Asrama Putri aktif. Seluruh data & pencarian dibatasi otomatis hanya untuk santri Putri dan asrama putri.'}
+              {!isScopePutra && !isScopePutri && currentUser.role === 'admin_lembaga' && 'Query dibatasi khusus pada Lembaga yang ditugaskan kepada Anda.'}
+              {!isScopePutra && !isScopePutri && currentUser.role === 'pengurus_asrama' && 'Query dibatasi khusus pada Asrama binaan yang ditugaskan kepada Anda.'}
+              {!isScopePutra && !isScopePutri && currentUser.role === 'viewer' && 'Akun Viewer (Hanya Lihat) dengan cakupan terbatas.'}
             </span>
           </div>
           <span className="font-mono text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded font-bold uppercase">
-            Enforced
+            {isScopePutra ? 'Asrama Putra' : isScopePutri ? 'Asrama Putri' : 'Enforced'}
           </span>
         </div>
       )}
@@ -203,17 +208,23 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             onChange={(e) => setFilters((prev) => ({ ...prev, asramaId: e.target.value, page: 1 }))}
             className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200"
           >
-            <option value="semua">Semua Asrama</option>
-            <optgroup label="Asrama Putra (Banin)">
-              {asramas.filter((a) => a.kelompokGender === 'Putra').map((a) => (
-                <option key={a.id} value={a.id}>{a.nama}</option>
-              ))}
-            </optgroup>
-            <optgroup label="Asrama Putri (Banat)">
-              {asramas.filter((a) => a.kelompokGender === 'Putri').map((a) => (
-                <option key={a.id} value={a.id}>{a.nama}</option>
-              ))}
-            </optgroup>
+            <option value="semua">
+              {isScopePutra ? 'Semua Asrama Putra' : isScopePutri ? 'Semua Asrama Putri' : 'Semua Asrama'}
+            </option>
+            {!isScopePutri && (
+              <optgroup label="Asrama Putra (Banin)">
+                {asramas.filter((a) => a.kelompokGender === 'Putra').map((a) => (
+                  <option key={a.id} value={a.id}>{a.nama}</option>
+                ))}
+              </optgroup>
+            )}
+            {!isScopePutra && (
+              <optgroup label="Asrama Putri (Banat)">
+                {asramas.filter((a) => a.kelompokGender === 'Putri').map((a) => (
+                  <option key={a.id} value={a.id}>{a.nama}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
 
           {/* Status Santri */}
@@ -323,13 +334,14 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               Jenis Kelamin:
             </label>
             <select
-              value={filters.jenisKelamin || 'semua'}
+              value={isScopePutra ? 'L' : isScopePutri ? 'P' : (filters.jenisKelamin || 'semua')}
+              disabled={isScopePutra || isScopePutri}
               onChange={(e) => setFilters((prev) => ({ ...prev, jenisKelamin: e.target.value, page: 1 }))}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300"
+              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 disabled:opacity-80 disabled:bg-slate-100 dark:disabled:bg-slate-800"
             >
-              <option value="semua">Semua Gender</option>
-              <option value="L">Putra (Banin)</option>
-              <option value="P">Putri (Banat)</option>
+              {!isScopePutra && !isScopePutri && <option value="semua">Semua Gender</option>}
+              {!isScopePutri && <option value="L">Putra (Banin)</option>}
+              {!isScopePutra && <option value="P">Putri (Banat)</option>}
             </select>
           </div>
 
@@ -518,7 +530,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           <strong className="text-slate-900 dark:text-white font-mono tabular-nums">
             {totalFiltered.toLocaleString('id-ID')}
           </strong>
-          <span>santri dalam cakupan wewenang</span>
+          <span>
+            {isScopePutra
+              ? 'santri dalam cakupan wewenang (Asrama Putra)'
+              : isScopePutri
+              ? 'santri dalam cakupan wewenang (Asrama Putri)'
+              : 'santri dalam cakupan wewenang'}
+          </span>
         </div>
 
         {activeCount > 0 && (

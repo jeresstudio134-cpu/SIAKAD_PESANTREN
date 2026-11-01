@@ -257,7 +257,7 @@ export const SantriTable: React.FC<SantriTableProps> = ({
       </div>
 
       {/* 2. Desktop High-Density Table View (>= 768px) */}
-      <div className="hidden md:block bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs">
+      <div className="hidden md:block bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs w-full">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -373,11 +373,11 @@ export const SantriTable: React.FC<SantriTableProps> = ({
                               {s.jenisKelamin === 'L' ? 'Putra' : 'Putri'}
                             </span>
                           </div>
-                          <div className="font-semibold text-slate-900 dark:text-white text-xs truncate max-w-[200px]">
+                          <div className="font-semibold text-slate-900 dark:text-white text-xs truncate max-w-xs xl:max-w-md">
                             {s.namaLengkap}
                           </div>
                           {s.kotaAsal && (
-                            <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[190px]">
+                            <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs xl:max-w-sm">
                               <MapPin className="w-2.5 h-2.5" />
                               <span>{s.kotaAsal}</span>
                             </div>
@@ -394,7 +394,7 @@ export const SantriTable: React.FC<SantriTableProps> = ({
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <div className="text-slate-800 dark:text-slate-200 truncate max-w-[180px]" title={s.asrama}>
+                      <div className="text-slate-800 dark:text-slate-200 truncate max-w-xs xl:max-w-sm" title={s.asrama}>
                         {s.asrama}
                       </div>
                     </td>
