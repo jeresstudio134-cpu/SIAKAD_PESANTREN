@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "siakad-pesantren",
+  "main": "src/worker.ts",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+
+  // Cloudflare Workers Static Assets (Frontend React + Vite build)
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Cloudflare D1 Database binding: diakses via c.env.DB
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "siakad_db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "./migrations"
+    }
+  ],
+
+  // Cloudflare R2 Storage binding: diakses via c.env.BUCKET
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "siakad-storage"
+    }
+  ],
+
+  // Environment variables publik
+  "vars": {
+    "APP_NAME": "SIAKAD Pesantren Modern",
+    "ENVIRONMENT": "production"
+  }
+}

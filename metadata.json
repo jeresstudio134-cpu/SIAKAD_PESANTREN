@@ -1,0 +1,6 @@
+{
+  "name": "SIAKAD Pesantren - Sistem Akademik Santri & Staf",
+  "description": "Sistem Informasi Akademik Pesantren modern, cepat, dan mobile-friendly untuk pemantauan serta pemfilteran data 2.000+ santri dan staf pengajar dengan Cloudflare Workers, D1, dan R2.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
