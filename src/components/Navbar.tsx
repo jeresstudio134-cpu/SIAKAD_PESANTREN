@@ -15,13 +15,14 @@ import {
   Layers,
   Building2,
   Home,
-  Calendar
+  Calendar,
+  ShieldAlert
 } from 'lucide-react';
 import type { UserSession, TahunAjaran } from '../types/index.ts';
 
 interface NavbarProps {
-  activeTab: 'santri' | 'staf' | 'stats' | 'deploy';
-  setActiveTab: (tab: 'santri' | 'staf' | 'stats' | 'deploy') => void;
+  activeTab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy';
+  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy') => void;
   currentUser: UserSession | null;
   onLogout: () => void;
   onOpenQuickLogin: () => void;
@@ -146,6 +147,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('asrama')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+              activeTab === 'asrama'
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Asrama & Kamar</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('stats')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
               activeTab === 'stats'
@@ -156,6 +169,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             <BarChart3 className="w-3.5 h-3.5" />
             <span>Statistik</span>
           </button>
+
+          {/* Super Admin Log Audit */}
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('audit')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                activeTab === 'audit'
+                  ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
+              <span>Log Audit</span>
+            </button>
+          )}
 
           {/* Super Admin Special Master Data Buttons */}
           {isSuperAdmin && (

@@ -45,6 +45,7 @@ export interface Kamar {
   asramaGender?: KelompokGender;
   namaKamar: string;
   kapasitas: number;
+  isFull?: number;
   terisiCount?: number;
   createdAt: string;
 }
@@ -73,6 +74,7 @@ export interface Santri {
   status: StatusSantri;
   namaAyah?: string | null;
   namaIbu?: string | null;
+  namaWali?: string | null;
   noHpWali?: string | null;
   alamatAsal?: string | null;
   kotaAsal?: string | null;
@@ -81,12 +83,15 @@ export interface Santri {
   capaianJuzHafalan: number;
   statusSpp: StatusSpp;
   poinPelanggaran: number;
+  tanggalMasuk?: string | null;
   tahunMasuk: string;
   catatanKesehatan?: string | null;
+  catatan?: string | null;
   fotoR2Key?: string | null;
   fotoUrl?: string | null;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
 }
 
 export interface Staf {
@@ -94,20 +99,142 @@ export interface Staf {
   nip: string;
   namaLengkap: string;
   jenisKelamin: JenisKelamin;
+  tempatLahir?: string | null;
+  tanggalLahir?: string | null;
   jabatan: string;
+  bagian?: 'Guru' | 'Ustadz/Ustadzah' | 'Pengurus' | 'Tata Usaha' | 'Musyrif/Musyrifah' | 'Keamanan' | string;
   mataPelajaranKitab?: string | null;
   jenjangAjar?: string | null;
   noHp?: string | null;
   email?: string | null;
-  statusKepegawaian: 'tetap' | 'kontrak' | 'khidmah' | 'honorer';
+  statusKepegawaian: 'tetap' | 'kontrak' | 'khidmah' | 'honorer' | 'pengabdian';
   alamat?: string | null;
   pendidikanTerakhir?: string | null;
   tanggalBergabung?: string | null;
+  tanggalMulaiTugas?: string | null;
   fotoR2Key?: string | null;
   fotoUrl?: string | null;
   isActive: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface Kelas {
+  id: string;
+  lembagaId: string;
+  lembagaNama?: string;
+  tingkat: string | number; // e.g. "7", "10", "Awaliyah"
+  namaKelas: string; // e.g. "VII-A Putra"
+  jurusan?: string | null; // e.g. "IPA", "IPS", "TKJ", "RPL"
+  kapasitas: number;
+  waliKelasStafId?: string | null;
+  waliKelasNama?: string | null;
+  totalSantri?: number;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface SantriKeanggotaan {
+  id: string;
+  santriId: string;
+  santriNama?: string;
+  santriNis?: string;
+  tahunAjaranId: string;
+  tahunAjaranNama?: string;
+  semester?: string;
+  lembagaId: string;
+  lembagaNama?: string;
+  lembagaKode?: string;
+  kelasId?: string | null;
+  kelasNama: string;
+  tingkat?: string | number;
+  status: 'aktif' | 'naik' | 'tinggal' | 'lulus' | 'keluar';
+  catatan?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface SantriKamar {
+  id: string;
+  santriId: string;
+  santriNama?: string;
+  tahunAjaranId: string;
+  tahunAjaranNama?: string;
+  kamarId: string;
+  kamarNama?: string;
+  asramaId?: string;
+  asramaNama?: string;
+  tanggalMulai: string;
+  tanggalSelesai?: string | null;
+  status: 'aktif' | 'selesai' | 'pindah';
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface StafPenugasan {
+  id: string;
+  stafId: string;
+  stafNama?: string;
+  tahunAjaranId: string;
+  tahunAjaranNama?: string;
+  semester?: string;
+  lembagaId?: string | null;
+  lembagaNama?: string | null;
+  tugasMapel: string;
+  waliKelasId?: string | null;
+  waliKelasNama?: string | null;
+  keterangan?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface Dokumen {
+  id: string;
+  pemilikTipe: 'santri' | 'staf';
+  pemilikId: string;
+  pemilikNama?: string;
+  jenis: string;
+  fileKey: string;
+  namaFile: string;
+  ukuranBytes?: number;
+  ukuran?: number;
+  mimeType?: string;
+  url?: string;
+  fileUrl?: string;
+  uploadedBy?: string;
+  catatan?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface UserScope {
+  id: string;
+  userId: string;
+  scopeType: 'lembaga' | 'asrama';
+  lembagaId?: string | null;
+  asramaId?: string | null;
+  targetNama?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface AuditLog {
+  id: string;
+  userId?: string | null;
+  userFullName?: string | null;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  details?: any;
+  ipAddress?: string | null;
+  createdAt: string;
 }
 
 export interface UserSession {
@@ -120,6 +247,7 @@ export interface UserSession {
   phone?: string | null;
   avatarUrl?: string | null;
   scopeSummary?: string;
+  mustChangePassword?: boolean;
 }
 
 export interface UserItem {
@@ -131,6 +259,7 @@ export interface UserItem {
   assignedAsramaIds: string[];
   phone?: string | null;
   isActive: number;
+  mustChangePassword?: number | boolean;
   createdAt: string;
 }
 
@@ -228,6 +357,7 @@ export interface KenaikanKelasPreviewItem {
   targetKamarId?: string;
   targetKamarNama?: string;
   isTingkatAkhir: boolean;
+  availableClasses?: string[];
   catatan?: string;
 }
 
@@ -263,8 +393,17 @@ export interface FilterParams {
   minJuz?: number;
   maxJuz?: number;
   minPoin?: number;
+  tahunMasuk?: string;
+  kotaAsal?: string;
   sortField?: string;
   sortDir?: 'asc' | 'desc';
   page?: number;
   limit?: number;
+}
+
+export interface SavedView {
+  id: string;
+  nama: string;
+  filters: FilterParams;
+  createdAt: string;
 }

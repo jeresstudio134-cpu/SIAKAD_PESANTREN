@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Save, AlertCircle } from 'lucide-react';
-import type { Santri, Lembaga, Asrama, Kamar } from '../types/index.ts';
+import type { Santri, Lembaga, Asrama, Kamar, TahunAjaran } from '../types/index.ts';
 
 interface SantriFormModalProps {
   initialData?: Santri | null;
@@ -8,6 +8,8 @@ interface SantriFormModalProps {
   onSuccess: () => void;
   lembagas: Lembaga[];
   asramas: Asrama[];
+  tahunAjarans?: TahunAjaran[];
+  selectedTahunAjaranId?: string;
 }
 
 export const SantriFormModal: React.FC<SantriFormModalProps> = ({
@@ -16,6 +18,8 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
   onSuccess,
   lembagas,
   asramas,
+  tahunAjarans = [],
+  selectedTahunAjaranId = '',
 }) => {
   const isEdit = !!initialData;
   const [submitting, setSubmitting] = React.useState(false);
@@ -25,6 +29,8 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
 
   const defaultLembaga = lembagas[0]?.id || '';
   const defaultAsrama = asramas[0]?.id || '';
+  const activeTA = tahunAjarans.find((t) => t.isActive === 1);
+  const defaultTAId = initialData?.tahunAjaranId || selectedTahunAjaranId || (activeTA ? activeTA.id : 'ta-2026');
 
   const [formData, setFormData] = React.useState({
     nis: initialData?.nis || '',
@@ -36,6 +42,7 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
     tempatLahir: initialData?.tempatLahir || '',
     tanggalLahir: initialData?.tanggalLahir || '2010-01-01',
     
+    tahunAjaranId: defaultTAId,
     lembagaId: initialData?.lembagaId || defaultLembaga,
     asramaId: initialData?.asramaId || defaultAsrama,
     kamarId: initialData?.kamarId || '',
@@ -257,8 +264,24 @@ export const SantriFormModal: React.FC<SantriFormModalProps> = ({
           {/* Section 2: Lembaga & Penempatan Kamar Asrama */}
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
             <h3 className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px] mb-2 text-emerald-700 dark:text-emerald-400">
-              2. Lembaga Pendidikan, Asrama & Kamar
+              2. Tahun Ajaran, Lembaga & Penempatan Asrama
             </h3>
+            <div className="mb-3">
+              <label className="block text-slate-600 dark:text-slate-300 font-medium mb-1">
+                Tahun Ajaran*:
+              </label>
+              <select
+                value={formData.tahunAjaranId}
+                onChange={(e) => setFormData({ ...formData, tahunAjaranId: e.target.value })}
+                className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 font-semibold text-slate-800 dark:text-slate-200"
+              >
+                {tahunAjarans.map((ta) => (
+                  <option key={ta.id} value={ta.id}>
+                    Tahun Ajaran {ta.nama} ({ta.semester}) {ta.isActive ? '• [Aktif Utama]' : '• [Arsip / Rencana]'}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-slate-600 dark:text-slate-300 font-medium mb-1">

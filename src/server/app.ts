@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, sql, desc, asc, like, or, gte, lte, inArray } from 'drizzle-orm';
+import { eq, and, sql, desc, asc, like, or, gte, lte, inArray, isNull } from 'drizzle-orm';
 import * as schema from '../db/schema.ts';
 import { hashPassword, verifyPassword, generateSessionToken, getCookie } from './auth.ts';
 import * as XLSX from 'xlsx';
@@ -39,6 +39,7 @@ async function getAuthUser(c: any) {
       phone: schema.users.phone,
       avatarUrl: schema.users.avatarUrl,
       isActive: schema.users.isActive,
+      mustChangePassword: schema.users.mustChangePassword,
     })
     .from(schema.sessions)
     .innerJoin(schema.users, eq(schema.sessions.userId, schema.users.id))
@@ -73,6 +74,7 @@ async function getAuthUser(c: any) {
     assignedAsramaIds: asramaIds,
     phone: session.phone,
     avatarUrl: session.avatarUrl,
+    mustChangePassword: session.mustChangePassword === 1,
   };
 }
 
@@ -138,6 +140,7 @@ app.post('/api/auth/login', async (c) => {
         assignedAsramaIds: assignedAsrama,
         phone: user.phone,
         avatarUrl: user.avatarUrl,
+        mustChangePassword: user.mustChangePassword === 1,
       },
     });
   } catch (err: any) {
@@ -198,6 +201,7 @@ app.post('/api/auth/quick-login', async (c) => {
         assignedAsramaIds: assignedAsrama,
         phone: user.phone,
         avatarUrl: user.avatarUrl,
+        mustChangePassword: user.mustChangePassword === 1,
       },
     });
   } catch (err: any) {
@@ -208,6 +212,67 @@ app.post('/api/auth/quick-login', async (c) => {
 app.get('/api/auth/me', async (c) => {
   const user = await getAuthUser(c);
   return c.json({ user });
+});
+
+app.post('/api/auth/change-password', async (c) => {
+  try {
+    const authUser = await getAuthUser(c);
+    if (!authUser) {
+      return c.json({ error: 'Sesi telah berakhir, silakan login kembali' }, 401);
+    }
+
+    const { currentPassword, newPassword, confirmPassword } = await c.req.json();
+    if (!newPassword || newPassword.length < 8) {
+      return c.json({ error: 'Kata sandi baru minimal harus 8 karakter' }, 400);
+    }
+
+    if (newPassword !== confirmPassword) {
+      return c.json({ error: 'Konfirmasi kata sandi tidak cocok dengan kata sandi baru' }, 400);
+    }
+
+    const db = getDb(c);
+    const user = await db.select().from(schema.users).where(eq(schema.users.id, authUser.id)).get();
+    if (!user) {
+      return c.json({ error: 'Pengguna tidak ditemukan' }, 404);
+    }
+
+    // Jika kata sandi saat ini disertakan, verifikasi kesesuaiannya
+    if (currentPassword) {
+      const isMatch = await verifyPassword(currentPassword, user.passwordHash, user.salt);
+      if (!isMatch) {
+        return c.json({ error: 'Kata sandi saat ini tidak sesuai' }, 400);
+      }
+    }
+
+    const { hash, salt } = await hashPassword(newPassword);
+    const now = new Date().toISOString();
+
+    await db.update(schema.users).set({
+      passwordHash: hash,
+      salt: salt,
+      mustChangePassword: 0,
+      updatedAt: now,
+    }).where(eq(schema.users.id, user.id));
+
+    // Catat log audit pergantian kata sandi
+    await db.insert(schema.auditLogs).values({
+      id: 'aud-' + Date.now(),
+      userId: user.id,
+      action: 'CHANGE_PASSWORD',
+      entityType: 'users',
+      entityId: user.id,
+      details: JSON.stringify({ message: 'Kata sandi akun berhasil diperbarui', username: user.username }),
+      ipAddress: c.req.header('x-forwarded-for') || '127.0.0.1',
+      createdAt: now,
+    });
+
+    return c.json({
+      success: true,
+      message: 'Kata sandi berhasil diperbarui. Akun Anda kini aktif dengan kredensial baru.',
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 app.post('/api/auth/logout', async (c) => {
@@ -525,6 +590,109 @@ app.put('/api/master/lembaga/:id', async (c) => {
   return c.json({ success: true });
 });
 
+// -------------------------------------------------------------
+// MASTER KELAS & JURUSAN (ENTITY KELAS)
+// -------------------------------------------------------------
+app.get('/api/master/kelas', async (c) => {
+  const db = getDb(c);
+  const lembagaId = c.req.query('lembagaId');
+  const conds: any[] = [isNull(schema.kelas.deletedAt)];
+  if (lembagaId && lembagaId !== 'semua') {
+    conds.push(eq(schema.kelas.lembagaId, lembagaId));
+  }
+
+  const rows = await db
+    .select({
+      id: schema.kelas.id,
+      lembagaId: schema.kelas.lembagaId,
+      lembagaNama: schema.lembaga.nama,
+      tingkat: schema.kelas.tingkat,
+      namaKelas: schema.kelas.namaKelas,
+      jurusan: schema.kelas.jurusan,
+      kapasitas: schema.kelas.kapasitas,
+      waliKelasStafId: schema.kelas.waliKelasStafId,
+      waliKelasNama: schema.staf.namaLengkap,
+      createdAt: schema.kelas.createdAt,
+      updatedAt: schema.kelas.updatedAt,
+    })
+    .from(schema.kelas)
+    .leftJoin(schema.lembaga, eq(schema.kelas.lembagaId, schema.lembaga.id))
+    .leftJoin(schema.staf, eq(schema.kelas.waliKelasStafId, schema.staf.id))
+    .where(and(...conds))
+    .orderBy(asc(schema.kelas.lembagaId), asc(schema.kelas.namaKelas))
+    .all();
+
+  // Attach total santri count per kelas
+  const formatted = await Promise.all(
+    rows.map(async (k) => {
+      const countRes = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.santri)
+        .where(and(eq(schema.santri.kelas, k.namaKelas), isNull(schema.santri.deletedAt)))
+        .get();
+
+      return {
+        ...k,
+        totalSantri: countRes?.count || 0,
+      };
+    })
+  );
+
+  return c.json({ data: formatted });
+});
+
+app.post('/api/master/kelas', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const payload = await c.req.json();
+  const db = getDb(c);
+  const id = 'kls-' + Date.now();
+  const now = new Date().toISOString();
+
+  await db.insert(schema.kelas).values({
+    id,
+    lembagaId: payload.lembagaId,
+    tingkat: payload.tingkat || payload.namaKelas.split(' ')[0],
+    namaKelas: payload.namaKelas,
+    jurusan: payload.jurusan || null,
+    kapasitas: Number(payload.kapasitas) || 35,
+    waliKelasStafId: payload.waliKelasStafId || null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return c.json({ success: true, id }, 201);
+});
+
+app.put('/api/master/kelas/:id', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const id = c.req.param('id');
+  const payload = await c.req.json();
+  const db = getDb(c);
+  const now = new Date().toISOString();
+
+  await db.update(schema.kelas).set({
+    ...payload,
+    kapasitas: payload.kapasitas ? Number(payload.kapasitas) : undefined,
+    updatedAt: now,
+  }).where(eq(schema.kelas.id, id));
+
+  return c.json({ success: true });
+});
+
+app.delete('/api/master/kelas/:id', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const now = new Date().toISOString();
+
+  // Soft delete via deleted_at
+  await db.update(schema.kelas).set({ deletedAt: now }).where(eq(schema.kelas.id, id));
+  return c.json({ success: true });
+});
+
 app.get('/api/master/asrama', async (c) => {
   const db = getDb(c);
   const rows = await db
@@ -604,6 +772,7 @@ app.get('/api/master/kamar', async (c) => {
       asramaGender: schema.asrama.kelompokGender,
       namaKamar: schema.kamar.namaKamar,
       kapasitas: schema.kamar.kapasitas,
+      isFull: schema.kamar.isFull,
       createdAt: schema.kamar.createdAt,
     })
     .from(schema.kamar)
@@ -649,10 +818,168 @@ app.post('/api/master/kamar', async (c) => {
     asramaId,
     namaKamar,
     kapasitas: Number(kapasitas) || 10,
+    isFull: 0,
     createdAt: now,
   });
 
   return c.json({ success: true, id }, 201);
+});
+
+// Daftar Santri Penghuni Kamar
+app.get('/api/kamar/:id/penghuni', async (c) => {
+  const kamarId = c.req.param('id');
+  const db = getDb(c);
+
+  const santriList = await db
+    .select({
+      id: schema.santri.id,
+      nis: schema.santri.nis,
+      namaLengkap: schema.santri.namaLengkap,
+      jenisKelamin: schema.santri.jenisKelamin,
+      jenjang: schema.santri.jenjang,
+      kelas: schema.santri.kelas,
+      status: schema.santri.status,
+      namaAyah: schema.santri.namaAyah,
+      namaIbu: schema.santri.namaIbu,
+      namaWali: schema.santri.namaWali,
+      noHpWali: schema.santri.noHpWali,
+      kotaAsal: schema.santri.kotaAsal,
+      capaianJuzHafalan: schema.santri.capaianJuzHafalan,
+      fotoUrl: schema.santri.fotoUrl,
+    })
+    .from(schema.santri)
+    .where(and(eq(schema.santri.kamarId, kamarId), isNull(schema.santri.deletedAt)))
+    .orderBy(asc(schema.santri.namaLengkap))
+    .all();
+
+  return c.json({ data: santriList });
+});
+
+// Tandai Kamar Penuh / Buka Kamar (Toggle)
+app.post('/api/kamar/:id/toggle-penuh', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak: Viewer read-only' }, 403);
+  const id = c.req.param('id');
+  const db = getDb(c);
+
+  const room = await db.select().from(schema.kamar).where(eq(schema.kamar.id, id)).get();
+  if (!room) return c.json({ error: 'Kamar tidak ditemukan' }, 404);
+
+  const newStatus = (room.isFull === 1) ? 0 : 1;
+  const now = new Date().toISOString();
+
+  await db.update(schema.kamar).set({ isFull: newStatus, updatedAt: now }).where(eq(schema.kamar.id, id));
+
+  await db.insert(schema.auditLogs).values({
+    id: 'log-' + Date.now(),
+    userId: user.id,
+    action: 'UPDATE',
+    entityType: 'kamar',
+    entityId: id,
+    details: JSON.stringify({
+      aksi: newStatus === 1 ? 'Tandai Kamar Penuh' : 'Buka Kamar Tersedia',
+      namaKamar: room.namaKamar,
+    }),
+    createdAt: now,
+  });
+
+  return c.json({ success: true, isFull: newStatus });
+});
+
+// Fitur Pindah Kamar Santri
+app.post('/api/kamar/pindah', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak: Viewer read-only' }, 403);
+
+  const { santriId, targetKamarId, catatan } = await c.req.json();
+  if (!santriId || !targetKamarId) {
+    return c.json({ error: 'Santri dan Kamar Tujuan wajib dipilih' }, 400);
+  }
+
+  const db = getDb(c);
+  const santri = await db.select().from(schema.santri).where(eq(schema.santri.id, santriId)).get();
+  if (!santri) return c.json({ error: 'Santri tidak ditemukan' }, 404);
+
+  const targetKamar = await db
+    .select({
+      id: schema.kamar.id,
+      namaKamar: schema.kamar.namaKamar,
+      kapasitas: schema.kamar.kapasitas,
+      isFull: schema.kamar.isFull,
+      asramaId: schema.asrama.id,
+      asramaNama: schema.asrama.nama,
+      kelompokGender: schema.asrama.kelompokGender,
+    })
+    .from(schema.kamar)
+    .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id))
+    .where(eq(schema.kamar.id, targetKamarId))
+    .get();
+
+  if (!targetKamar) return c.json({ error: 'Kamar tujuan tidak ditemukan' }, 404);
+
+  const requiredGender = targetKamar.kelompokGender === 'Putra' ? 'L' : 'P';
+  if (santri.jenisKelamin !== requiredGender) {
+    return c.json({
+      error: `Kamar berada di ${targetKamar.asramaNama} (${targetKamar.kelompokGender}), sedangkan santri adalah ${santri.jenisKelamin === 'L' ? 'Putra' : 'Putri'}`
+    }, 400);
+  }
+
+  const countOccupants = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.santri)
+    .where(and(eq(schema.santri.kamarId, targetKamarId), isNull(schema.santri.deletedAt)))
+    .get();
+
+  const currentOccupants = countOccupants?.count || 0;
+  if (currentOccupants >= targetKamar.kapasitas && targetKamar.isFull === 1) {
+    return c.json({ error: `Kamar ${targetKamar.namaKamar} sudah ditandai penuh (${currentOccupants}/${targetKamar.kapasitas})` }, 400);
+  }
+
+  const oldAsrama = santri.asrama;
+  const oldKamar = santri.kamarLabel;
+  const newAsrama = `${targetKamar.asramaNama} - ${targetKamar.namaKamar}`;
+  const now = new Date().toISOString();
+
+  await db.update(schema.santri).set({
+    asramaId: targetKamar.asramaId,
+    kamarId: targetKamar.id,
+    asrama: newAsrama,
+    kamarLabel: targetKamar.namaKamar,
+    updatedAt: now,
+  }).where(eq(schema.santri.id, santriId));
+
+  await db.insert(schema.penempatanKamar).values({
+    id: 'pk-' + Date.now(),
+    santriId,
+    asramaId: targetKamar.asramaId,
+    kamarId: targetKamar.id,
+    tahunAjaranId: santri.tahunAjaranId || 'ta-default',
+    tanggalMulai: now.split('T')[0],
+    status: 'aktif',
+    catatan: catatan || `Pindah dari ${oldAsrama || 'Kamar sebelumnya'}`,
+    createdAt: now,
+  });
+
+  await db.insert(schema.auditLogs).values({
+    id: 'log-' + Date.now(),
+    userId: user.id,
+    action: 'PINDAH_KAMAR',
+    entityType: 'santri',
+    entityId: santriId,
+    details: JSON.stringify({
+      namaSantri: santri.namaLengkap,
+      nis: santri.nis,
+      kamarAsal: `${oldAsrama} (${oldKamar})`,
+      kamarTujuan: newAsrama,
+      catatan,
+    }),
+    createdAt: now,
+  });
+
+  return c.json({
+    success: true,
+    message: `Santri ${santri.namaLengkap} berhasil dipindahkan ke ${newAsrama}`,
+  });
 });
 
 // -------------------------------------------------------------
@@ -1180,7 +1507,46 @@ app.post('/api/santri', async (c) => {
       updatedAt: now,
     };
 
+    // Cari tahun ajaran aktif jika tidak diberikan
+    if (!newSantri.tahunAjaranId) {
+      const activeTA = await db.select().from(schema.tahunAjaran).where(eq(schema.tahunAjaran.isActive, 1)).get();
+      if (activeTA) newSantri.tahunAjaranId = activeTA.id;
+    }
+
     await db.insert(schema.santri).values(newSantri);
+
+    // Simpan riwayat akademik awal untuk tahun ajaran terkait
+    if (newSantri.tahunAjaranId) {
+      const rwId = `rw-${newSantri.tahunAjaranId}-${id}`;
+      await db.insert(schema.riwayatAkademik).values({
+        id: rwId,
+        santriId: id,
+        tahunAjaranId: newSantri.tahunAjaranId,
+        lembagaId: newSantri.lembagaId || '',
+        jenjang: newSantri.jenjang,
+        tingkatKelas: newSantri.kelas ? newSantri.kelas.split(' ')[0] : newSantri.kelas,
+        kelas: newSantri.kelas,
+        status: newSantri.status === 'lulus' ? 'lulus' : (newSantri.status === 'mutasi' ? 'mutasi' : 'aktif'),
+        catatan: 'Pendaftaran santri baru',
+        createdAt: now,
+      });
+
+      // Simpan penempatan kamar jika dipilih
+      if (newSantri.kamarId) {
+        const pkId = `pk-${newSantri.tahunAjaranId}-${id}`;
+        await db.insert(schema.penempatanKamar).values({
+          id: pkId,
+          santriId: id,
+          asramaId: newSantri.asramaId,
+          kamarId: newSantri.kamarId,
+          tahunAjaranId: newSantri.tahunAjaranId,
+          tanggalMulai: now.split('T')[0],
+          status: 'aktif',
+          createdAt: now,
+        });
+      }
+    }
+
     return c.json({ success: true, santri: newSantri }, 201);
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -1221,6 +1587,74 @@ app.put('/api/santri/:id', async (c) => {
         updatedAt: now,
       })
       .where(eq(schema.santri.id, id));
+
+    // Sinkronkan ke riwayat akademik dan penempatan kamar tahun ajaran bersangkutan
+    const currentTAId = payload.tahunAjaranId || existing.tahunAjaranId;
+    if (currentTAId) {
+      const existingRw = await db
+        .select()
+        .from(schema.riwayatAkademik)
+        .where(and(eq(schema.riwayatAkademik.santriId, id), eq(schema.riwayatAkademik.tahunAjaranId, currentTAId)))
+        .get();
+
+      const newKelas = payload.kelas || existing.kelas;
+      const newJenjang = payload.jenjang || existing.jenjang;
+      const newLembagaId = payload.lembagaId !== undefined ? payload.lembagaId : existing.lembagaId;
+      const newStatus = payload.status || existing.status;
+
+      if (existingRw) {
+        await db.update(schema.riwayatAkademik).set({
+          kelas: newKelas,
+          jenjang: newJenjang,
+          tingkatKelas: newKelas ? newKelas.split(' ')[0] : newKelas,
+          lembagaId: newLembagaId || existingRw.lembagaId,
+          status: newStatus,
+        }).where(eq(schema.riwayatAkademik.id, existingRw.id));
+      } else {
+        await db.insert(schema.riwayatAkademik).values({
+          id: `rw-${currentTAId}-${id}`,
+          santriId: id,
+          tahunAjaranId: currentTAId,
+          lembagaId: newLembagaId || '',
+          jenjang: newJenjang,
+          tingkatKelas: newKelas ? newKelas.split(' ')[0] : newKelas,
+          kelas: newKelas,
+          status: newStatus,
+          catatan: 'Penyesuaian profil santri',
+          createdAt: now,
+        });
+      }
+
+      // Update / insert penempatan kamar
+      const newKamarId = payload.kamarId !== undefined ? payload.kamarId : existing.kamarId;
+      const newAsramaId = payload.asramaId !== undefined ? payload.asramaId : existing.asramaId;
+
+      if (newKamarId) {
+        const existingPk = await db
+          .select()
+          .from(schema.penempatanKamar)
+          .where(and(eq(schema.penempatanKamar.santriId, id), eq(schema.penempatanKamar.tahunAjaranId, currentTAId)))
+          .get();
+
+        if (existingPk) {
+          await db.update(schema.penempatanKamar).set({
+            kamarId: newKamarId,
+            asramaId: newAsramaId,
+          }).where(eq(schema.penempatanKamar.id, existingPk.id));
+        } else {
+          await db.insert(schema.penempatanKamar).values({
+            id: `pk-${currentTAId}-${id}`,
+            santriId: id,
+            asramaId: newAsramaId,
+            kamarId: newKamarId,
+            tahunAjaranId: currentTAId,
+            tanggalMulai: now.split('T')[0],
+            status: 'aktif',
+            createdAt: now,
+          });
+        }
+      }
+    }
 
     const updated = await db.select().from(schema.santri).where(eq(schema.santri.id, id)).get();
     return c.json({ success: true, santri: updated });
@@ -1962,6 +2396,221 @@ app.get('/api/export/santri', async (c) => {
   }
 });
 
+// Custom Export Multi-Dataset dengan Pemilihan Kolom Bebas
+app.post('/api/export/custom', async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    const db = getDb(c);
+    const body = await c.req.json();
+    const { type, selectedColumns, filters = {} } = body;
+
+    const workbook = XLSX.utils.book_new();
+    let filename = `Export_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    if (type === 'santri') {
+      filename = `Export_Santri_Custom_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const conditions = buildScopeEnforcementConditions(user);
+
+      if (filters.search) conditions.push(or(like(schema.santri.nis, `%${filters.search}%`), like(schema.santri.namaLengkap, `%${filters.search}%`)));
+      if (filters.tahunAjaranId && filters.tahunAjaranId !== 'semua') {
+        conditions.push(
+          or(
+            eq(schema.santri.tahunAjaranId, filters.tahunAjaranId),
+            sql`EXISTS (SELECT 1 FROM riwayat_akademik ra WHERE ra.santri_id = ${schema.santri.id} AND ra.tahun_ajaran_id = ${filters.tahunAjaranId})`
+          )
+        );
+      }
+      if (filters.lembagaId && filters.lembagaId !== 'semua') conditions.push(eq(schema.santri.lembagaId, filters.lembagaId));
+      if (filters.asramaId && filters.asramaId !== 'semua') conditions.push(eq(schema.santri.asramaId, filters.asramaId));
+      if (filters.status && filters.status !== 'semua') conditions.push(eq(schema.santri.status, filters.status));
+
+      const query = db.select().from(schema.santri);
+      if (conditions.length > 0) query.where(and(...conditions));
+      const list = await query.orderBy(asc(schema.santri.nis)).all();
+
+      const colDefs: Record<string, (s: any) => any> = {
+        nis: (s) => s.nis,
+        nisn: (s) => s.nisn || '-',
+        nik: (s) => s.nik || '-',
+        namaLengkap: (s) => s.namaLengkap,
+        jenisKelamin: (s) => (s.jenisKelamin === 'L' ? 'Putra' : 'Putri'),
+        jenjang: (s) => s.jenjang,
+        kelas: (s) => s.kelas,
+        asrama: (s) => s.asrama,
+        kamarLabel: (s) => s.kamarLabel || '-',
+        status: (s) => s.status.toUpperCase(),
+        capaianJuzHafalan: (s) => s.capaianJuzHafalan,
+        statusSpp: (s) => s.statusSpp,
+        namaAyah: (s) => s.namaAyah || '-',
+        namaIbu: (s) => s.namaIbu || '-',
+        noHpWali: (s) => s.noHpWali || '-',
+        alamatAsal: (s) => s.alamatAsal || '-',
+        kotaAsal: (s) => s.kotaAsal || '-',
+        tahunMasuk: (s) => s.tahunMasuk,
+      };
+
+      const labelMap: Record<string, string> = {
+        nis: 'NIS',
+        nisn: 'NISN',
+        nik: 'NIK',
+        namaLengkap: 'Nama Lengkap',
+        jenisKelamin: 'L/P',
+        jenjang: 'Lembaga / Jenjang',
+        kelas: 'Kelas / Rombel',
+        asrama: 'Asrama',
+        kamarLabel: 'Kamar',
+        status: 'Status Santri',
+        capaianJuzHafalan: 'Capaian Juz',
+        statusSpp: 'Status SPP',
+        namaAyah: 'Nama Ayah',
+        namaIbu: 'Nama Ibu',
+        noHpWali: 'No HP Wali',
+        alamatAsal: 'Alamat Asal',
+        kotaAsal: 'Kota / Kab Asal',
+        tahunMasuk: 'Tahun Masuk',
+      };
+
+      const cols = Array.isArray(selectedColumns) && selectedColumns.length > 0
+        ? selectedColumns
+        : Object.keys(colDefs);
+
+      const rows = list.map((s, idx) => {
+        const rowObj: Record<string, any> = { No: idx + 1 };
+        for (const col of cols) {
+          if (colDefs[col]) {
+            rowObj[labelMap[col] || col] = colDefs[col](s);
+          }
+        }
+        return rowObj;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Santri');
+    } else if (type === 'staf') {
+      filename = `Export_Staf_Pengajar_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const stafList = await db.select().from(schema.staf).orderBy(asc(schema.staf.namaLengkap)).all();
+      const rows = stafList.map((st, idx) => ({
+        'No': idx + 1,
+        'NIP': st.nip,
+        'Nama Lengkap': st.namaLengkap,
+        'L/P': st.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan',
+        'Bagian': st.bagian,
+        'Jabatan': st.jabatan,
+        'Mapel / Kitab': st.mataPelajaranKitab || '-',
+        'Jenjang Ajar': st.jenjangAjar || '-',
+        'No HP': st.noHp || '-',
+        'Status Kepegawaian': st.statusKepegawaian,
+        'Pendidikan Terakhir': st.pendidikanTerakhir || '-',
+        'Tanggal Bergabung': st.tanggalBergabung,
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Staf');
+    } else if (type === 'kamar') {
+      filename = `Rekap_Penghuni_Kamar_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const kamars = await db
+        .select({
+          kamarId: schema.kamar.id,
+          namaKamar: schema.kamar.namaKamar,
+          kapasitas: schema.kamar.kapasitas,
+          isFull: schema.kamar.isFull,
+          asramaNama: schema.asrama.nama,
+          asramaGender: schema.asrama.kelompokGender,
+          musyrifNama: schema.staf.namaLengkap,
+        })
+        .from(schema.kamar)
+        .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id))
+        .leftJoin(schema.staf, eq(schema.asrama.musyrifStafId, schema.staf.id))
+        .orderBy(asc(schema.asrama.nama), asc(schema.kamar.namaKamar))
+        .all();
+
+      const santriAll = await db
+        .select({
+          kamarId: schema.santri.kamarId,
+          namaLengkap: schema.santri.namaLengkap,
+          nis: schema.santri.nis,
+          kelas: schema.santri.kelas,
+          noHpWali: schema.santri.noHpWali,
+        })
+        .from(schema.santri)
+        .where(isNull(schema.santri.deletedAt))
+        .all();
+
+      const occupantsMap = new Map<string, string[]>();
+      for (const s of santriAll) {
+        if (!s.kamarId) continue;
+        const list = occupantsMap.get(s.kamarId) || [];
+        list.push(`${s.namaLengkap} (${s.nis} - ${s.kelas})`);
+        occupantsMap.set(s.kamarId, list);
+      }
+
+      const rows = kamars.map((k, idx) => {
+        const occ = occupantsMap.get(k.kamarId) || [];
+        return {
+          'No': idx + 1,
+          'Asrama': k.asramaNama,
+          'Gender': k.asramaGender,
+          'Kamar': k.namaKamar,
+          'Kapasitas': k.kapasitas,
+          'Terisi': occ.length,
+          'Sisa Kapasitas': Math.max(0, k.kapasitas - occ.length),
+          'Status': (k.isFull === 1 || occ.length >= k.kapasitas) ? 'PENUH' : 'TERSEDIA',
+          'Musyrif / Pembina': k.musyrifNama || '-',
+          'Daftar Penghuni': occ.join(', ') || '(Kosong)',
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap Kamar');
+    } else if (type === 'rekap_lembaga') {
+      filename = `Rekap_Lembaga_Kelas_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const lembagas = await db.select().from(schema.lembaga).all();
+      const allSantri = await db.select().from(schema.santri).where(isNull(schema.santri.deletedAt)).all();
+
+      const rows: any[] = [];
+      let no = 1;
+
+      for (const lmb of lembagas) {
+        let classes: string[] = [];
+        try { classes = JSON.parse(lmb.tingkatKelas); } catch (e) {}
+
+        const lmbSantri = allSantri.filter((s) => s.lembagaId === lmb.id || s.jenjang === lmb.nama || s.jenjang === lmb.kode);
+
+        for (const cls of classes) {
+          const clsSantri = lmbSantri.filter((s) => s.kelas === cls);
+          const putra = clsSantri.filter((s) => s.jenisKelamin === 'L').length;
+          const putri = clsSantri.filter((s) => s.jenisKelamin === 'P').length;
+          const aktif = clsSantri.filter((s) => s.status === 'aktif').length;
+
+          rows.push({
+            'No': no++,
+            'Lembaga': lmb.nama,
+            'Kode': lmb.kode,
+            'Kelas / Rombel': cls,
+            'Santri Putra': putra,
+            'Santri Putri': putri,
+            'Total Santri': clsSantri.length,
+            'Status Aktif': aktif,
+            'Status Non-Aktif/Izin': clsSantri.length - aktif,
+          });
+        }
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap Lembaga');
+    }
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // Staf, Tahfidz, Perizinan, Pelanggaran, and Storage Endpoints
 app.get('/api/staf', async (c) => {
   const db = getDb(c);
@@ -2160,4 +2809,231 @@ app.post('/api/pelanggaran', async (c) => {
     await db.update(schema.santri).set({ poinPelanggaran: (current.poinPelanggaran || 0) + poin, updatedAt: now }).where(eq(schema.santri.id, payload.santriId));
   }
   return c.json({ success: true, id }, 201);
+});
+
+// -------------------------------------------------------------
+// STAF PENUGASAN (AKADEMIK & WALI KELAS)
+// -------------------------------------------------------------
+app.get('/api/staf/penugasan', async (c) => {
+  const db = getDb(c);
+  const tahunAjaranId = c.req.query('tahunAjaranId');
+  const stafId = c.req.query('stafId');
+  const conds: any[] = [isNull(schema.stafPenugasan.deletedAt)];
+  if (tahunAjaranId && tahunAjaranId !== 'semua') conds.push(eq(schema.stafPenugasan.tahunAjaranId, tahunAjaranId));
+  if (stafId) conds.push(eq(schema.stafPenugasan.stafId, stafId));
+
+  const rows = await db
+    .select({
+      id: schema.stafPenugasan.id,
+      stafId: schema.stafPenugasan.stafId,
+      stafNama: schema.staf.namaLengkap,
+      stafNip: schema.staf.nip,
+      tahunAjaranId: schema.stafPenugasan.tahunAjaranId,
+      tahunAjaranNama: schema.tahunAjaran.nama,
+      lembagaId: schema.stafPenugasan.lembagaId,
+      lembagaNama: schema.lembaga.nama,
+      tugasMapel: schema.stafPenugasan.tugasMapel,
+      waliKelasId: schema.stafPenugasan.waliKelasId,
+      waliKelasNama: schema.kelas.namaKelas,
+      keterangan: schema.stafPenugasan.keterangan,
+      createdAt: schema.stafPenugasan.createdAt,
+    })
+    .from(schema.stafPenugasan)
+    .innerJoin(schema.staf, eq(schema.stafPenugasan.stafId, schema.staf.id))
+    .innerJoin(schema.tahunAjaran, eq(schema.stafPenugasan.tahunAjaranId, schema.tahunAjaran.id))
+    .leftJoin(schema.lembaga, eq(schema.stafPenugasan.lembagaId, schema.lembaga.id))
+    .leftJoin(schema.kelas, eq(schema.stafPenugasan.waliKelasId, schema.kelas.id))
+    .where(and(...conds))
+    .all();
+
+  return c.json({ data: rows });
+});
+
+app.post('/api/staf/penugasan', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const payload = await c.req.json();
+  const db = getDb(c);
+  const id = 'tgs-' + Date.now();
+  const now = new Date().toISOString();
+
+  await db.insert(schema.stafPenugasan).values({
+    id,
+    stafId: payload.stafId,
+    tahunAjaranId: payload.tahunAjaranId,
+    lembagaId: payload.lembagaId || null,
+    tugasMapel: payload.tugasMapel,
+    waliKelasId: payload.waliKelasId || null,
+    keterangan: payload.keterangan || null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return c.json({ success: true, id }, 201);
+});
+
+app.delete('/api/staf/penugasan/:id', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const now = new Date().toISOString();
+
+  await db.update(schema.stafPenugasan).set({ deletedAt: now }).where(eq(schema.stafPenugasan.id, id));
+  return c.json({ success: true });
+});
+
+// -------------------------------------------------------------
+// DOKUMEN DIGITAL (BERKAS SANTRI & STAF)
+// -------------------------------------------------------------
+app.get('/api/dokumen', async (c) => {
+  const db = getDb(c);
+  const pemilikTipe = c.req.query('pemilikTipe');
+  const pemilikId = c.req.query('pemilikId');
+
+  const conds: any[] = [isNull(schema.dokumen.deletedAt)];
+  if (pemilikTipe) conds.push(eq(schema.dokumen.pemilikTipe, pemilikTipe));
+  if (pemilikId) conds.push(eq(schema.dokumen.pemilikId, pemilikId));
+
+  const rows = await db
+    .select()
+    .from(schema.dokumen)
+    .where(and(...conds))
+    .orderBy(desc(schema.dokumen.createdAt))
+    .all();
+
+  return c.json({ data: rows });
+});
+
+app.post('/api/dokumen', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const payload = await c.req.json();
+  const db = getDb(c);
+  const id = 'doc-' + Date.now();
+  const now = new Date().toISOString();
+
+  await db.insert(schema.dokumen).values({
+    id,
+    pemilikTipe: payload.pemilikTipe || 'santri',
+    pemilikId: payload.pemilikId,
+    jenis: payload.jenis || 'Lainnya',
+    fileKey: payload.fileKey,
+    namaFile: payload.namaFile,
+    ukuranBytes: Number(payload.ukuranBytes) || 0,
+    mimeType: payload.mimeType || 'application/pdf',
+    url: payload.url || `/api/storage/${payload.fileKey}`,
+    uploadedBy: user.id,
+    catatan: payload.catatan || null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return c.json({ success: true, id }, 201);
+});
+
+app.delete('/api/dokumen/:id', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const now = new Date().toISOString();
+
+  await db.update(schema.dokumen).set({ deletedAt: now }).where(eq(schema.dokumen.id, id));
+  return c.json({ success: true });
+});
+
+// -------------------------------------------------------------
+// MULTI-LEMBAGA: SANTRI KEANGGOTAAN
+// (Satu santri boleh banyak lembaga dalam satu tahun ajaran)
+// -------------------------------------------------------------
+app.get('/api/santri/:id/keanggotaan', async (c) => {
+  const id = c.req.param('id');
+  const db = getDb(c);
+  const tahunAjaranId = c.req.query('tahunAjaranId');
+
+  const conds: any[] = [
+    eq(schema.santriKeanggotaan.santriId, id),
+    isNull(schema.santriKeanggotaan.deletedAt),
+  ];
+  if (tahunAjaranId && tahunAjaranId !== 'semua') {
+    conds.push(eq(schema.santriKeanggotaan.tahunAjaranId, tahunAjaranId));
+  }
+
+  const rows = await db
+    .select({
+      id: schema.santriKeanggotaan.id,
+      santriId: schema.santriKeanggotaan.santriId,
+      tahunAjaranId: schema.santriKeanggotaan.tahunAjaranId,
+      tahunAjaranNama: schema.tahunAjaran.nama,
+      semester: schema.tahunAjaran.semester,
+      lembagaId: schema.santriKeanggotaan.lembagaId,
+      lembagaNama: schema.lembaga.nama,
+      lembagaKode: schema.lembaga.kode,
+      kelasId: schema.santriKeanggotaan.kelasId,
+      kelasNama: schema.santriKeanggotaan.kelasNama,
+      status: schema.santriKeanggotaan.status,
+      catatan: schema.santriKeanggotaan.catatan,
+      createdAt: schema.santriKeanggotaan.createdAt,
+    })
+    .from(schema.santriKeanggotaan)
+    .innerJoin(schema.tahunAjaran, eq(schema.santriKeanggotaan.tahunAjaranId, schema.tahunAjaran.id))
+    .innerJoin(schema.lembaga, eq(schema.santriKeanggotaan.lembagaId, schema.lembaga.id))
+    .where(and(...conds))
+    .orderBy(desc(schema.tahunAjaran.nama), asc(schema.lembaga.nama))
+    .all();
+
+  return c.json({ data: rows });
+});
+
+app.post('/api/santri/:id/keanggotaan', async (c) => {
+  const user = await getAuthUser(c);
+  if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
+  const santriId = c.req.param('id');
+  const payload = await c.req.json();
+  const db = getDb(c);
+  const id = 'kg-' + Date.now();
+  const now = new Date().toISOString();
+
+  await db.insert(schema.santriKeanggotaan).values({
+    id,
+    santriId,
+    tahunAjaranId: payload.tahunAjaranId,
+    lembagaId: payload.lembagaId,
+    kelasId: payload.kelasId || null,
+    kelasNama: payload.kelasNama,
+    status: payload.status || 'aktif',
+    catatan: payload.catatan || 'Pendaftaran lembaga tambahan (multi-lembaga)',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return c.json({ success: true, id }, 201);
+});
+
+// -------------------------------------------------------------
+// AUDIT LOGS TRAIL
+// -------------------------------------------------------------
+app.get('/api/audit-logs', async (c) => {
+  const db = getDb(c);
+  const limit = Math.min(100, Math.max(10, parseInt(c.req.query('limit') || '50', 10)));
+  const rows = await db
+    .select({
+      id: schema.auditLogs.id,
+      userId: schema.auditLogs.userId,
+      userFullName: schema.users.fullName,
+      action: schema.auditLogs.action,
+      entityType: schema.auditLogs.entityType,
+      entityId: schema.auditLogs.entityId,
+      details: schema.auditLogs.details,
+      ipAddress: schema.auditLogs.ipAddress,
+      createdAt: schema.auditLogs.createdAt,
+    })
+    .from(schema.auditLogs)
+    .leftJoin(schema.users, eq(schema.auditLogs.userId, schema.users.id))
+    .orderBy(desc(schema.auditLogs.createdAt))
+    .limit(limit)
+    .all();
+
+  return c.json({ data: rows });
 });

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Users, UserCheck, BarChart3, Cloud, Plus } from 'lucide-react';
+import { Users, UserCheck, BarChart3, Cloud, Plus, Home } from 'lucide-react';
 
 interface MobileBottomNavProps {
-  activeTab: 'santri' | 'staf' | 'stats' | 'deploy';
-  setActiveTab: (tab: 'santri' | 'staf' | 'stats' | 'deploy') => void;
+  activeTab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy';
+  setActiveTab: (tab: 'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy') => void;
   onOpenAddModal: () => void;
 }
 
@@ -66,17 +66,17 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <span className="text-[10px] mt-1 tracking-tight">Statistik</span>
         </button>
 
-        {/* Tab 4: Deploy Cloudflare */}
+        {/* Tab 4: Asrama & Kamar */}
         <button
-          onClick={() => setActiveTab('deploy')}
+          onClick={() => setActiveTab('asrama')}
           className={`flex flex-col items-center justify-center min-h-[48px] rounded-lg transition-colors ${
-            activeTab === 'deploy'
-              ? 'text-amber-600 dark:text-amber-400 font-semibold'
+            activeTab === 'asrama'
+              ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
               : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
           }`}
         >
-          <Cloud className="w-5 h-5" />
-          <span className="text-[10px] mt-1 tracking-tight">Cloudflare</span>
+          <Home className="w-5 h-5" />
+          <span className="text-[10px] mt-1 tracking-tight">Asrama</span>
         </button>
 
       </div>

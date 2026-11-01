@@ -22,11 +22,46 @@ async function startServer() {
   const dbPath = path.join(__dirname, '.d1_local.sqlite');
   const sqliteDb = new Database(dbPath);
 
-  // Jalankan Migrasi D1 Init SQL
+  // Safe migration helper for existing SQLite databases
+  const safeAddCol = (table: string, col: string, def: string) => {
+    try { sqliteDb.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def};`); } catch (e) {}
+  };
+  safeAddCol('santri', 'nama_wali', 'TEXT');
+  safeAddCol('santri', 'tanggal_masuk', 'TEXT');
+  safeAddCol('santri', 'catatan', 'TEXT');
+  safeAddCol('santri', 'deleted_at', 'TEXT');
+  safeAddCol('staf', 'tempat_lahir', 'TEXT');
+  safeAddCol('staf', 'tanggal_lahir', 'TEXT');
+  safeAddCol('staf', 'bagian', "TEXT NOT NULL DEFAULT 'Guru'");
+  safeAddCol('staf', 'tanggal_mulai_tugas', 'TEXT');
+  safeAddCol('staf', 'deleted_at', 'TEXT');
+  safeAddCol('tahun_ajaran', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('tahun_ajaran', 'deleted_at', 'TEXT');
+  safeAddCol('lembaga', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('lembaga', 'deleted_at', 'TEXT');
+  safeAddCol('asrama', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('asrama', 'deleted_at', 'TEXT');
+  safeAddCol('kamar', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('kamar', 'deleted_at', 'TEXT');
+  safeAddCol('kamar', 'is_full', 'INTEGER NOT NULL DEFAULT 0');
+  safeAddCol('users', 'deleted_at', 'TEXT');
+  safeAddCol('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
+  safeAddCol('riwayat_akademik', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('riwayat_akademik', 'deleted_at', 'TEXT');
+  safeAddCol('penempatan_kamar', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+  safeAddCol('penempatan_kamar', 'deleted_at', 'TEXT');
+  safeAddCol('penempatan_kamar', 'catatan', 'TEXT');
+  safeAddCol('santri_kamar', 'catatan', 'TEXT');
+
+  // Jalankan Migrasi D1 Init SQL (Create tables & indexes)
   const migrationPath = path.join(__dirname, 'migrations', '0000_init.sql');
   if (fs.existsSync(migrationPath)) {
-    const migrationSql = fs.readFileSync(migrationPath, 'utf-8');
-    sqliteDb.exec(migrationSql);
+    try {
+      const migrationSql = fs.readFileSync(migrationPath, 'utf-8');
+      sqliteDb.exec(migrationSql);
+    } catch (e) {
+      console.warn('Migration warning:', (e as any).message);
+    }
   }
 
   // Seed Data: 2.000 Santri, Staf, & Akun Awal

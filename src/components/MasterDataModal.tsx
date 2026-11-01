@@ -11,9 +11,10 @@ import {
   Users, 
   DoorClosed,
   Layers,
-  CheckCircle2
+  CheckCircle2,
+  GraduationCap
 } from 'lucide-react';
-import type { Lembaga, Asrama, Kamar, TahunAjaran, Staf } from '../types/index.ts';
+import type { Lembaga, Asrama, Kamar, TahunAjaran, Staf, Kelas } from '../types/index.ts';
 
 interface MasterDataModalProps {
   onClose: () => void;
@@ -26,10 +27,11 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
   onRefreshParent,
   onOpenNaikKelas,
 }) => {
-  const [activeTab, setActiveTab] = React.useState<'lembaga' | 'asrama' | 'tahun_ajaran'>('lembaga');
+  const [activeTab, setActiveTab] = React.useState<'lembaga' | 'kelas' | 'asrama' | 'tahun_ajaran'>('lembaga');
   const [loading, setLoading] = React.useState(true);
 
   const [lembagas, setLembagas] = React.useState<Lembaga[]>([]);
+  const [kelasList, setKelasList] = React.useState<Kelas[]>([]);
   const [asramas, setAsramas] = React.useState<Asrama[]>([]);
   const [kamars, setKamars] = React.useState<Kamar[]>([]);
   const [tahunAjarans, setTahunAjarans] = React.useState<TahunAjaran[]>([]);
@@ -38,6 +40,9 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
   // Selected asrama for viewing its rooms
   const [selectedAsramaId, setSelectedAsramaId] = React.useState<string | null>(null);
 
+  // Selected lembaga filter for Kelas tab
+  const [selectedLembagaFilterForKelas, setSelectedLembagaFilterForKelas] = React.useState('semua');
+
   // Form modals state
   const [showAddLembaga, setShowAddLembaga] = React.useState(false);
   const [lembagaForm, setLembagaForm] = React.useState({
@@ -45,6 +50,16 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     nama: '',
     tingkatKelasStr: '',
     keterangan: '',
+  });
+
+  const [showAddKelas, setShowAddKelas] = React.useState(false);
+  const [kelasForm, setKelasForm] = React.useState({
+    lembagaId: '',
+    tingkat: 7,
+    namaKelas: '',
+    jurusan: '',
+    kapasitas: 32,
+    waliKelasStafId: '',
   });
 
   const [showAddAsrama, setShowAddAsrama] = React.useState(false);
@@ -75,16 +90,18 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [lRes, aRes, kRes, taRes, sRes] = await Promise.all([
+      const [lRes, cRes, aRes, kRes, taRes, sRes] = await Promise.all([
         fetch('/api/master/lembaga'),
+        fetch('/api/master/kelas'),
         fetch('/api/master/asrama'),
         fetch('/api/master/kamar'),
         fetch('/api/master/tahun-ajaran'),
         fetch('/api/staf'),
       ]);
 
-      const [lData, aData, kData, taData, sData] = await Promise.all([
+      const [lData, cData, aData, kData, taData, sData] = await Promise.all([
         lRes.json(),
+        cRes.json(),
         aRes.json(),
         kRes.json(),
         taRes.json(),
@@ -92,6 +109,7 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
       ]);
 
       setLembagas(lData.data || []);
+      setKelasList(cData.data || []);
       setAsramas(aData.data || []);
       setKamars(kData.data || []);
       setTahunAjarans(taData.data || []);
@@ -99,6 +117,9 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
 
       if (aData.data && aData.data.length > 0 && !selectedAsramaId) {
         setSelectedAsramaId(aData.data[0].id);
+      }
+      if (lData.data && lData.data.length > 0 && !kelasForm.lembagaId) {
+        setKelasForm((prev) => ({ ...prev, lembagaId: lData.data[0].id }));
       }
     } catch (err) {
       console.error(err);
@@ -136,6 +157,47 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
     setLembagaForm({ kode: '', nama: '', tingkatKelasStr: '', keterangan: '' });
     fetchData();
     onRefreshParent();
+  };
+
+  const handleSaveKelas = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!kelasForm.lembagaId || !kelasForm.namaKelas) {
+      alert('Pilih Lembaga dan isi Nama Kelas.');
+      return;
+    }
+
+    try {
+      await fetch('/api/master/kelas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kelasForm),
+      });
+
+      setShowAddKelas(false);
+      setKelasForm({
+        lembagaId: lembagas[0]?.id || '',
+        tingkat: 7,
+        namaKelas: '',
+        jurusan: '',
+        kapasitas: 32,
+        waliKelasStafId: '',
+      });
+      fetchData();
+      onRefreshParent();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteKelas = async (id: string, namaKelas: string) => {
+    if (!confirm(`Hapus rombel/kelas "${namaKelas}"?`)) return;
+    try {
+      await fetch(`/api/master/kelas/${id}`, { method: 'DELETE' });
+      fetchData();
+      onRefreshParent();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSaveAsrama = async (e: React.FormEvent) => {
@@ -246,10 +308,10 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 px-5 bg-white dark:bg-slate-900 gap-6 text-xs font-semibold">
+        <div className="flex border-b border-slate-200 dark:border-slate-800 px-5 bg-white dark:bg-slate-900 gap-5 text-xs font-semibold overflow-x-auto no-scrollbar">
           <button
             onClick={() => setActiveTab('lembaga')}
-            className={`py-3 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`py-3 border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'lembaga'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -260,20 +322,32 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('kelas')}
+            className={`py-3 border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'kelas'
+                ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <GraduationCap className="w-4 h-4" />
+            <span>Master Kelas ({kelasList.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('asrama')}
-            className={`py-3 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`py-3 border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'asrama'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Home className="w-4 h-4" />
-            <span>Asrama & Kamar ({asramas.length} Asrama)</span>
+            <span>Asrama & Kamar ({asramas.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('tahun_ajaran')}
-            className={`py-3 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`py-3 border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'tahun_ajaran'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -419,6 +493,207 @@ export const MasterDataModal: React.FC<MasterDataModalProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* TAB: MASTER KELAS & JURUSAN */}
+          {activeTab === 'kelas' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm">Master Rombongan Belajar (Kelas) & Jurusan</h3>
+                  <p className="text-slate-500 text-[11px]">
+                    Struktur kelas resmi untuk penempatan santri, riwayat kenaikan kelas, dan penugasan wali kelas.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedLembagaFilterForKelas}
+                    onChange={(e) => setSelectedLembagaFilterForKelas(e.target.value)}
+                    className="px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
+                  >
+                    <option value="semua">Semua Lembaga ({kelasList.length})</option>
+                    {lembagas.map((l) => (
+                      <option key={l.id} value={l.id}>{l.nama} ({l.kode})</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => setShowAddKelas(!showAddKelas)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs cursor-pointer shadow-xs shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Tambah Kelas</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Form Tambah Kelas */}
+              {showAddKelas && (
+                <form onSubmit={handleSaveKelas} className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl space-y-3 animate-in fade-in">
+                  <h4 className="font-bold text-emerald-900 dark:text-emerald-300">Tambah Rombel / Kelas Baru</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Lembaga Pendidkan*:</label>
+                      <select
+                        required
+                        value={kelasForm.lembagaId}
+                        onChange={(e) => setKelasForm({ ...kelasForm, lembagaId: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      >
+                        {lembagas.map((l) => (
+                          <option key={l.id} value={l.id}>{l.nama} ({l.kode})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Tingkat Kelas (Angka 1-12)*:</label>
+                      <input
+                        type="number"
+                        required
+                        min="1"
+                        max="12"
+                        value={kelasForm.tingkat}
+                        onChange={(e) => setKelasForm({ ...kelasForm, tingkat: Number(e.target.value) })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Nama / Rombel Kelas*:</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Contoh: 7-A, 10-IPA-1, Jilid 3"
+                        value={kelasForm.namaKelas}
+                        onChange={(e) => setKelasForm({ ...kelasForm, namaKelas: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Jurusan / Peminatan (Opsional):</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: MIPA, IPS, Keagamaan, Tahfidz"
+                        value={kelasForm.jurusan}
+                        onChange={(e) => setKelasForm({ ...kelasForm, jurusan: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Kapasitas Maksimum (Santri):</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={kelasForm.kapasitas}
+                        onChange={(e) => setKelasForm({ ...kelasForm, kapasitas: Number(e.target.value) })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium mb-1">Wali Kelas (Staf / Guru):</label>
+                      <select
+                        value={kelasForm.waliKelasStafId}
+                        onChange={(e) => setKelasForm({ ...kelasForm, waliKelasStafId: e.target.value })}
+                        className="w-full px-2.5 py-1.5 border rounded-lg bg-white dark:bg-slate-800 text-xs"
+                      >
+                        <option value="">-- Belum Ditentukan --</option>
+                        {stafList.map((st) => (
+                          <option key={st.id} value={st.id}>{st.namaLengkap} ({st.jabatan})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddKelas(false)}
+                      className="px-3 py-1.5 text-slate-600 dark:text-slate-300 text-xs cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
+                    >
+                      Simpan Kelas
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Grid Kelas */}
+              {(() => {
+                const filtered = kelasList.filter((k) =>
+                  selectedLembagaFilterForKelas === 'semua'
+                    ? true
+                    : k.lembagaId === selectedLembagaFilterForKelas
+                );
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-slate-400 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                      <GraduationCap className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                      Belum ada rombel kelas yang terdaftar untuk lembaga ini.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filtered.map((k) => (
+                      <div
+                        key={k.id}
+                        className="p-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xs space-y-2 hover:border-emerald-500/50 transition-colors"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px]">
+                                Tingkat {k.tingkat}
+                              </span>
+                              {k.jurusan && (
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-medium text-[10px]">
+                                  {k.jurusan}
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="font-bold text-slate-900 dark:text-white text-sm mt-1">
+                              Kelas {k.namaKelas}
+                            </h4>
+                          </div>
+
+                          <button
+                            onClick={() => handleDeleteKelas(k.id, k.namaKelas)}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                            title="Hapus Kelas"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-700/60">
+                          <span>{k.lembagaNama || 'Lembaga'}</span>
+                          <span className="font-mono font-medium">{k.kapasitas || 32} Kursi</span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                          <Users className="w-3 h-3 text-slate-400" />
+                          <span className="truncate">
+                            Wali: <strong>{k.waliKelasNama || 'Belum ada wali kelas'}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

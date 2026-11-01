@@ -16,14 +16,19 @@ import { StatsView } from './components/StatsView.tsx';
 import { DeployModal } from './components/DeployModal.tsx';
 import { LoginModal } from './components/LoginModal.tsx';
 import { NaikKelasModal } from './components/NaikKelasModal.tsx';
+import { KamarView } from './components/KamarView.tsx';
+import { AuditLogView } from './components/AuditLogView.tsx';
+import { ExportModal } from './components/ExportModal.tsx';
+import { ChangePasswordModal } from './components/ChangePasswordModal.tsx';
 
 import type { Santri, DashboardStats, FilterParams, UserSession, Lembaga, Asrama, TahunAjaran } from './types/index.ts';
 
 export default function App() {
-  const [activeTab, setActiveTab] = React.useState<'santri' | 'staf' | 'stats' | 'deploy'>('santri');
+  const [activeTab, setActiveTab] = React.useState<'santri' | 'staf' | 'asrama' | 'stats' | 'audit' | 'deploy'>('santri');
   const [currentUser, setCurrentUser] = React.useState<UserSession | null>(null);
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
   const [loadingStats, setLoadingStats] = React.useState(true);
+  const [showExportModal, setShowExportModal] = React.useState(false);
 
   // Master Data & Academic Year State
   const [lembagas, setLembagas] = React.useState<Lembaga[]>([]);
@@ -274,7 +279,7 @@ export default function App() {
         onOpenAddStaf={() => setActiveTab('staf')}
         onOpenMasterData={() => setShowMasterModal(true)}
         onOpenUserManagement={() => setShowUserModal(true)}
-        onExportExcel={handleExportExcel}
+        onExportExcel={() => setShowExportModal(true)}
         isExporting={isExporting}
         tahunAjaranList={tahunAjarans}
         selectedTahunAjaranId={selectedTahunAjaranId}
@@ -335,7 +340,16 @@ export default function App() {
           <StafView onOpenAddModal={() => {}} />
         )}
 
-        {/* TAB 3: STATISTIK & ANALISIS */}
+        {/* TAB 3: MANAJEMEN ASRAMA & KAMAR */}
+        {activeTab === 'asrama' && (
+          <KamarView
+            asramas={asramas}
+            currentUser={currentUser}
+            onRefreshMaster={fetchMasterData}
+          />
+        )}
+
+        {/* TAB 4: STATISTIK & ANALISIS */}
         {activeTab === 'stats' && (
           <StatsView
             stats={stats}
@@ -350,7 +364,12 @@ export default function App() {
           />
         )}
 
-        {/* TAB 4: PANDUAN DEPLOY CLOUDFLARE */}
+        {/* TAB 5: LOG AUDIT (SUPER ADMIN) */}
+        {activeTab === 'audit' && (
+          <AuditLogView currentUser={currentUser} />
+        )}
+
+        {/* TAB 6: PANDUAN DEPLOY CLOUDFLARE */}
         {activeTab === 'deploy' && (
           <DeployModal />
         )}
@@ -388,6 +407,8 @@ export default function App() {
           initialData={editingSantri}
           lembagas={lembagas}
           asramas={asramas}
+          tahunAjarans={tahunAjarans}
+          selectedTahunAjaranId={selectedTahunAjaranId}
           onClose={() => {
             setIsAddingSantri(false);
             setEditingSantri(null);
@@ -478,6 +499,29 @@ export default function App() {
           fetchStats();
         }}
       />
+
+      {/* Export Excel Modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        activeFilters={filters}
+        selectedTahunAjaran={tahunAjarans.find((t) => t.id === selectedTahunAjaranId)}
+      />
+
+      {/* Forced Password Change Modal for initial Superadmin */}
+      {currentUser && currentUser.mustChangePassword && (
+        <ChangePasswordModal
+          user={currentUser}
+          onSuccess={(updatedUser) => {
+            setCurrentUser(updatedUser);
+          }}
+          onLogout={async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            setCurrentUser(null);
+            setShowLoginModal(true);
+          }}
+        />
+      )}
 
     </div>
   );

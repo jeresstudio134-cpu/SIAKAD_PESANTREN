@@ -17,11 +17,19 @@ export interface D1Result<T = unknown> {
 }
 
 export class D1PreparedStatementEmulator {
+  private db: Database.Database;
+  private sql: string;
+  private params: any[];
+
   constructor(
-    private db: Database.Database,
-    private sql: string,
-    private params: any[] = []
-  ) {}
+    db: Database.Database,
+    sql: string,
+    params: any[] = []
+  ) {
+    this.db = db;
+    this.sql = sql;
+    this.params = params;
+  }
 
   bind(...values: any[]) {
     return new D1PreparedStatementEmulator(this.db, this.sql, values);

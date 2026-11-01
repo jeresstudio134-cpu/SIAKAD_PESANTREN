@@ -68,6 +68,15 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
+  // Master Kamar List for Room Editing
+  const [allKamars, setAllKamars] = useState<Array<{
+    id: string;
+    namaKamar: string;
+    asramaId: string;
+    asramaNama: string;
+    asramaGender: string;
+  }>>([]);
+
   // Sync initial select values when list loads
   useEffect(() => {
     if (activeTA && !fromTahunAjaranId) {
@@ -81,10 +90,23 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchHistory();
+      fetchKamars();
       setSuccessMessage(null);
       setErrorMessage(null);
     }
   }, [isOpen]);
+
+  const fetchKamars = async () => {
+    try {
+      const res = await fetch('/api/master/kamar');
+      const json = await res.json();
+      if (json.data) {
+        setAllKamars(json.data);
+      }
+    } catch (e) {
+      console.error('Error fetching kamars:', e);
+    }
+  };
 
   const fetchHistory = async () => {
     try {
@@ -99,6 +121,17 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
     } finally {
       setLoadingHistory(false);
     }
+  };
+
+  const handleToggleSalinKamar = (copy: boolean) => {
+    setSalinKamar(copy);
+    setItems((prev) =>
+      prev.map((it) => ({
+        ...it,
+        targetKamarId: copy ? (it.currentKamarId || '') : '',
+        targetKamarNama: copy ? (it.currentKamarNama || '') : '',
+      }))
+    );
   };
 
   const handleFetchPreview = async () => {
@@ -428,11 +461,11 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
                     <input
                       type="checkbox"
                       checked={salinKamar}
-                      onChange={(e) => setSalinKamar(e.target.checked)}
+                      onChange={(e) => handleToggleSalinKamar(e.target.checked)}
                       className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
                     />
                     <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Salin penempatan kamar dari tahun sebelumnya (santri tetap di asrama & kamar yang sama)
+                      Salin penempatan kamar dari tahun sebelumnya (santri tetap di asrama & kamar yang sama, bisa disesuaikan di tabel)
                     </span>
                   </label>
 
@@ -634,7 +667,7 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
                                         {!availableCls.includes(item.targetKelas) && (
                                           <option value={item.targetKelas}>{item.targetKelas}</option>
                                         )}
-                                        {availableCls.map((cName) => (
+                                        {availableCls.map((cName: string) => (
                                           <option key={cName} value={cName}>
                                             {cName}
                                           </option>
@@ -643,17 +676,43 @@ export const NaikKelasModal: React.FC<NaikKelasModalProps> = ({
                                     )}
                                   </td>
 
-                                  {/* Target Room */}
+                                  {/* Target Room (Salin kamar opsional, bisa diedit) */}
                                   <td className="px-3 py-2 text-slate-600 dark:text-slate-400 text-[11px]">
-                                    {salinKamar ? (
-                                      <div className="flex items-center gap-1">
-                                        <Home className="w-3 h-3 text-slate-400 shrink-0" />
-                                        <span className="truncate max-w-[140px]" title={item.currentAsramaNama + ' - ' + item.currentKamarNama}>
-                                          {item.currentKamarNama || 'Belum di Kamar'}
-                                        </span>
-                                      </div>
+                                    {item.targetAction === 'lulus' ? (
+                                      <span className="text-slate-400 italic text-[11px]">- (Lulus/Alumni)</span>
+                                    ) : item.targetAction === 'mutasi' ? (
+                                      <span className="text-slate-400 italic text-[11px]">- (Mutasi)</span>
                                     ) : (
-                                      <span className="text-slate-400 italic">Dikosongkan</span>
+                                      <div className="flex items-center gap-1.5">
+                                        <Home className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                        <select
+                                          value={item.targetKamarId || ''}
+                                          onChange={(e) => {
+                                            const selKamarId = e.target.value;
+                                            const chosenKamar = allKamars.find((k) => k.id === selKamarId);
+                                            handleItemChange(realIdx, {
+                                              targetKamarId: selKamarId,
+                                              targetKamarNama: chosenKamar ? `${chosenKamar.asramaNama} - ${chosenKamar.namaKamar}` : '',
+                                            });
+                                          }}
+                                          className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-medium max-w-[210px] truncate"
+                                          title="Pilih atau sesuaikan kamar santri untuk tahun ajaran baru"
+                                        >
+                                          <option value="">-- Dikosongkan --</option>
+                                          {item.currentKamarId && !allKamars.some((k) => k.id === item.currentKamarId) && (
+                                            <option value={item.currentKamarId}>
+                                              {item.currentKamarNama || 'Kamar Sebelumnya'}
+                                            </option>
+                                          )}
+                                          {allKamars
+                                            .filter((k) => k.asramaGender === (item.jenisKelamin === 'L' ? 'Putra' : 'Putri'))
+                                            .map((k) => (
+                                              <option key={k.id} value={k.id}>
+                                                {k.asramaNama} - {k.namaKamar}
+                                              </option>
+                                            ))}
+                                        </select>
+                                      </div>
                                     )}
                                   </td>
                                 </tr>
