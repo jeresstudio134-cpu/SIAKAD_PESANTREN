@@ -132,27 +132,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span className="text-[10px] text-slate-500 block mt-0.5">Hanya melihat & mengelola santri SMA/SMK</span>
               </button>
 
-              {/* 4. Pengurus Asrama Putra */}
+              {/* 4. Pengelola Asrama Putra */}
               <button
                 type="button"
                 onClick={() => handleQuickLogin('musyrif_putra')}
                 className="p-2.5 text-left border border-slate-200 dark:border-slate-700 rounded-xl hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/20 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <strong className="block text-slate-900 dark:text-white font-semibold">Pengurus Asrama Putra</strong>
+                  <strong className="block text-slate-900 dark:text-white font-semibold">Pengelola Asrama Putra</strong>
                   <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">Putra Only</span>
                 </div>
                 <span className="text-[10px] text-slate-500 block mt-0.5">Hanya akses santri di 4 Asrama Putra (1.000 santri)</span>
               </button>
 
-              {/* 5. Pengurus Asrama Putri */}
+              {/* 5. Pengelola Asrama Putri */}
               <button
                 type="button"
                 onClick={() => handleQuickLogin('musyrifah_putri')}
                 className="p-2.5 text-left border border-slate-200 dark:border-slate-700 rounded-xl hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/20 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <strong className="block text-slate-900 dark:text-white font-semibold">Pengurus Asrama Putri</strong>
+                  <strong className="block text-slate-900 dark:text-white font-semibold">Pengelola Asrama Putri</strong>
                   <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-1.5 py-0.5 rounded">Putri Only</span>
                 </div>
                 <span className="text-[10px] text-slate-500 block mt-0.5">Hanya akses santri di 3 Asrama Putri (1.000 santri)</span>

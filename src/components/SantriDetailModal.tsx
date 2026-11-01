@@ -123,16 +123,23 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
     sanksi: 'Membersihkan musholla & membaca wirid',
   });
 
+  const [errorForbidden, setErrorForbidden] = React.useState<string | null>(null);
+
   const fetchDetail = async () => {
     try {
       setLoading(true);
+      setErrorForbidden(null);
       const res = await fetch(`/api/santri/${santri.id}`);
       const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || 'Akses ditolak: Santri di luar cakupan wewenang');
+      }
       if (json.santri) {
         setDetailData(json);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Fetch santri detail error:', err);
+      setErrorForbidden(err.message || 'Akses ditolak: Santri ini di luar cakupan wewenang Anda.');
     } finally {
       setLoading(false);
     }
@@ -419,6 +426,31 @@ export const SantriDetailModal: React.FC<SantriDetailModalProps> = ({
   const availableClassesForSelectedLembaga = kelasList.filter(
     (c) => !keanggotaanForm.lembagaId || c.lembagaId === keanggotaanForm.lembagaId
   );
+
+  if (errorForbidden) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+        <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl border border-rose-200 dark:border-rose-900/60 p-6 text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Akses Dibatasi Server</h3>
+            <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 font-semibold">{errorForbidden}</p>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Akun Anda ({currentUser?.scopeAsrama === 'putra' ? 'Pengelola Asrama Putra' : currentUser?.scopeAsrama === 'putri' ? 'Pengelola Asrama Putri' : currentUser?.role}) tidak memiliki otoritas untuk melihat data santri ini.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold cursor-pointer"
+          >
+            Tutup & Kembali ke Daftar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">

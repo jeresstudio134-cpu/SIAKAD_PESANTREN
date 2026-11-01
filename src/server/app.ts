@@ -190,6 +190,16 @@ app.post('/api/auth/quick-login', async (c) => {
     let user;
     if (username) {
       user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
+    } else if (role === 'pengurus_asrama_putra') {
+      user = await db.select().from(schema.users).where(eq(schema.users.username, 'musyrif_putra')).get();
+      if (!user) {
+        user = await db.select().from(schema.users).where(eq(schema.users.scopeAsrama, 'putra')).get();
+      }
+    } else if (role === 'pengurus_asrama_putri') {
+      user = await db.select().from(schema.users).where(eq(schema.users.username, 'musyrifah_putri')).get();
+      if (!user) {
+        user = await db.select().from(schema.users).where(eq(schema.users.scopeAsrama, 'putri')).get();
+      }
     } else if (role) {
       user = await db.select().from(schema.users).where(eq(schema.users.role, role)).get();
     } else {
@@ -964,8 +974,28 @@ app.post('/api/kamar/:id/toggle-penuh', async (c) => {
   const id = c.req.param('id');
   const db = getDb(c);
 
-  const room = await db.select().from(schema.kamar).where(eq(schema.kamar.id, id)).get();
+  const room = await db
+    .select({
+      id: schema.kamar.id,
+      namaKamar: schema.kamar.namaKamar,
+      isFull: schema.kamar.isFull,
+      asramaId: schema.kamar.asramaId,
+      kelompokGender: schema.asrama.kelompokGender,
+    })
+    .from(schema.kamar)
+    .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id))
+    .where(eq(schema.kamar.id, id))
+    .get();
+
   if (!room) return c.json({ error: 'Kamar tidak ditemukan' }, 404);
+
+  const scopeAsrama = resolveUserScopeAsrama(user);
+  if (scopeAsrama === 'putra' && room.kelompokGender !== 'Putra') {
+    return c.json({ error: 'Akses ditolak: Kamar ini di luar cakupan wewenang Anda (Asrama Putra)' }, 403);
+  }
+  if (scopeAsrama === 'putri' && room.kelompokGender !== 'Putri') {
+    return c.json({ error: 'Akses ditolak: Kamar ini di luar cakupan wewenang Anda (Asrama Putri)' }, 403);
+  }
 
   const newStatus = (room.isFull === 1) ? 0 : 1;
   const now = new Date().toISOString();
@@ -1002,6 +1032,11 @@ app.post('/api/kamar/pindah', async (c) => {
   const santri = await db.select().from(schema.santri).where(eq(schema.santri.id, santriId)).get();
   if (!santri) return c.json({ error: 'Santri tidak ditemukan' }, 404);
 
+  // SERVER-SIDE SCOPE ENFORCEMENT ON SANTRI:
+  if (!isSantriInScope(user, santri)) {
+    return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+  }
+
   const targetKamar = await db
     .select({
       id: schema.kamar.id,
@@ -1018,6 +1053,14 @@ app.post('/api/kamar/pindah', async (c) => {
     .get();
 
   if (!targetKamar) return c.json({ error: 'Kamar tujuan tidak ditemukan' }, 404);
+
+  const scopeAsrama = resolveUserScopeAsrama(user);
+  if (scopeAsrama === 'putra' && targetKamar.kelompokGender !== 'Putra') {
+    return c.json({ error: 'Akses ditolak: Kamar tujuan berada di luar wewenang Anda (Asrama Putra)' }, 403);
+  }
+  if (scopeAsrama === 'putri' && targetKamar.kelompokGender !== 'Putri') {
+    return c.json({ error: 'Akses ditolak: Kamar tujuan berada di luar wewenang Anda (Asrama Putri)' }, 403);
+  }
 
   const requiredGender = targetKamar.kelompokGender === 'Putra' ? 'L' : 'P';
   if (santri.jenisKelamin !== requiredGender) {
@@ -1219,7 +1262,7 @@ app.delete('/api/users/:id', async (c) => {
 // HELPER: SERVER-SIDE SCOPE ENFORCEMENT ON EVERY SANTRI QUERY
 // -------------------------------------------------------------
 function buildScopeEnforcementConditions(user: any) {
-  const scopeConditions: any[] = [];
+  const scopeConditions: any[] = [isNull(schema.santri.deletedAt)];
   if (!user || user.role === 'superadmin') {
     return scopeConditions;
   }
@@ -1326,6 +1369,7 @@ app.get('/api/santri', async (c) => {
     if (kelas && kelas !== 'semua') {
       conditions.push(eq(schema.santri.kelas, kelas));
     }
+    const userScope = resolveUserScopeAsrama(user);
     if (asramaId && asramaId !== 'semua') {
       conditions.push(eq(schema.santri.asramaId, asramaId));
     }
@@ -1333,7 +1377,13 @@ app.get('/api/santri', async (c) => {
       conditions.push(eq(schema.santri.kamarId, kamarId));
     }
     if (jk && jk !== 'semua') {
-      conditions.push(eq(schema.santri.jenisKelamin, jk as any));
+      if (userScope === 'putra' && jk !== 'L') {
+        conditions.push(sql`1 = 0`);
+      } else if (userScope === 'putri' && jk !== 'P') {
+        conditions.push(sql`1 = 0`);
+      } else {
+        conditions.push(eq(schema.santri.jenisKelamin, jk as any));
+      }
     }
     if (status && status !== 'semua') {
       conditions.push(eq(schema.santri.status, status as any));
@@ -2632,7 +2682,12 @@ app.post('/api/export/custom', async (c) => {
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Santri');
     } else if (type === 'staf') {
       filename = `Export_Staf_Pengajar_${new Date().toISOString().split('T')[0]}.xlsx`;
-      const stafList = await db.select().from(schema.staf).orderBy(asc(schema.staf.namaLengkap)).all();
+      const scopeAsrama = resolveUserScopeAsrama(user);
+      const stafConds: any[] = [isNull(schema.staf.deletedAt)];
+      if (scopeAsrama === 'putra') stafConds.push(eq(schema.staf.jenisKelamin, 'L'));
+      else if (scopeAsrama === 'putri') stafConds.push(eq(schema.staf.jenisKelamin, 'P'));
+
+      const stafList = await db.select().from(schema.staf).where(and(...stafConds)).orderBy(asc(schema.staf.namaLengkap)).all();
       const rows = stafList.map((st, idx) => ({
         'No': idx + 1,
         'NIP': st.nip,
@@ -2651,7 +2706,12 @@ app.post('/api/export/custom', async (c) => {
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Staf');
     } else if (type === 'kamar') {
       filename = `Rekap_Penghuni_Kamar_${new Date().toISOString().split('T')[0]}.xlsx`;
-      const kamars = await db
+      const scopeAsrama = resolveUserScopeAsrama(user);
+      const kamarConds: any[] = [];
+      if (scopeAsrama === 'putra') kamarConds.push(eq(schema.asrama.kelompokGender, 'Putra'));
+      else if (scopeAsrama === 'putri') kamarConds.push(eq(schema.asrama.kelompokGender, 'Putri'));
+
+      const queryKamars = db
         .select({
           kamarId: schema.kamar.id,
           namaKamar: schema.kamar.namaKamar,
@@ -2663,10 +2723,12 @@ app.post('/api/export/custom', async (c) => {
         })
         .from(schema.kamar)
         .innerJoin(schema.asrama, eq(schema.kamar.asramaId, schema.asrama.id))
-        .leftJoin(schema.staf, eq(schema.asrama.musyrifStafId, schema.staf.id))
-        .orderBy(asc(schema.asrama.nama), asc(schema.kamar.namaKamar))
-        .all();
+        .leftJoin(schema.staf, eq(schema.asrama.musyrifStafId, schema.staf.id));
 
+      if (kamarConds.length > 0) queryKamars.where(and(...kamarConds));
+      const kamars = await queryKamars.orderBy(asc(schema.asrama.nama), asc(schema.kamar.namaKamar)).all();
+
+      const santriScopeConds = buildScopeEnforcementConditions(user);
       const santriAll = await db
         .select({
           kamarId: schema.santri.kamarId,
@@ -2676,7 +2738,7 @@ app.post('/api/export/custom', async (c) => {
           noHpWali: schema.santri.noHpWali,
         })
         .from(schema.santri)
-        .where(isNull(schema.santri.deletedAt))
+        .where(and(...santriScopeConds))
         .all();
 
       const occupantsMap = new Map<string, string[]>();
@@ -2708,7 +2770,8 @@ app.post('/api/export/custom', async (c) => {
     } else if (type === 'rekap_lembaga') {
       filename = `Rekap_Lembaga_Kelas_${new Date().toISOString().split('T')[0]}.xlsx`;
       const lembagas = await db.select().from(schema.lembaga).all();
-      const allSantri = await db.select().from(schema.santri).where(isNull(schema.santri.deletedAt)).all();
+      const santriScopeConds = buildScopeEnforcementConditions(user);
+      const allSantri = await db.select().from(schema.santri).where(and(...santriScopeConds)).all();
 
       const rows: any[] = [];
       let no = 1;
@@ -3036,8 +3099,16 @@ app.post('/api/import/santri', async (c) => {
 
 // Staf, Tahfidz, Perizinan, Pelanggaran, and Storage Endpoints
 app.get('/api/staf', async (c) => {
+  const user = await getAuthUser(c);
   const db = getDb(c);
-  const rows = await db.select().from(schema.staf).orderBy(asc(schema.staf.namaLengkap)).all();
+  const scopeAsrama = resolveUserScopeAsrama(user);
+  const conds: any[] = [isNull(schema.staf.deletedAt)];
+  if (scopeAsrama === 'putra') {
+    conds.push(eq(schema.staf.jenisKelamin, 'L'));
+  } else if (scopeAsrama === 'putri') {
+    conds.push(eq(schema.staf.jenisKelamin, 'P'));
+  }
+  const rows = await db.select().from(schema.staf).where(and(...conds)).orderBy(asc(schema.staf.namaLengkap)).all();
   return c.json({ data: rows, total: rows.length });
 });
 
@@ -3143,11 +3214,19 @@ app.get('/api/storage/*', async (c) => {
 });
 
 // Tahfidz, Perizinan & Pelanggaran
+// Tahfidz, Perizinan & Pelanggaran
 app.post('/api/tahfidz', async (c) => {
   const user = await getAuthUser(c);
   if (user && user.role === 'viewer') return c.json({ error: 'Viewer read-only' }, 403);
   const payload = await c.req.json();
   const db = getDb(c);
+
+  const targetSantri = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.santriId)).get();
+  if (!targetSantri || targetSantri.deletedAt) return c.json({ error: 'Santri tidak ditemukan' }, 404);
+  if (!isSantriInScope(user, targetSantri)) {
+    return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+  }
+
   const now = new Date().toISOString();
   const id = 'thf-' + Date.now();
   await db.insert(schema.tahfidzRecords).values({
@@ -3163,11 +3242,8 @@ app.post('/api/tahfidz', async (c) => {
     createdAt: now,
   });
 
-  if (payload.juz) {
-    const s = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.santriId)).get();
-    if (s && payload.juz > s.capaianJuzHafalan) {
-      await db.update(schema.santri).set({ capaianJuzHafalan: Number(payload.juz), updatedAt: now }).where(eq(schema.santri.id, payload.santriId));
-    }
+  if (payload.juz && payload.juz > targetSantri.capaianJuzHafalan) {
+    await db.update(schema.santri).set({ capaianJuzHafalan: Number(payload.juz), updatedAt: now }).where(eq(schema.santri.id, payload.santriId));
   }
   return c.json({ success: true, id }, 201);
 });
@@ -3177,6 +3253,13 @@ app.post('/api/perizinan', async (c) => {
   if (user && user.role === 'viewer') return c.json({ error: 'Viewer read-only' }, 403);
   const payload = await c.req.json();
   const db = getDb(c);
+
+  const targetSantri = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.santriId)).get();
+  if (!targetSantri || targetSantri.deletedAt) return c.json({ error: 'Santri tidak ditemukan' }, 404);
+  if (!isSantriInScope(user, targetSantri)) {
+    return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+  }
+
   const now = new Date().toISOString();
   const id = 'izin-' + Date.now();
   await db.insert(schema.perizinan).values({
@@ -3203,6 +3286,12 @@ app.put('/api/perizinan/:id/selesai', async (c) => {
   const now = new Date().toISOString();
   const permit = await db.select().from(schema.perizinan).where(eq(schema.perizinan.id, id)).get();
   if (!permit) return c.json({ error: 'Not found' }, 404);
+
+  const targetSantri = await db.select().from(schema.santri).where(eq(schema.santri.id, permit.santriId)).get();
+  if (!targetSantri || !isSantriInScope(user, targetSantri)) {
+    return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+  }
+
   await db.update(schema.perizinan).set({ status: 'selesai' }).where(eq(schema.perizinan.id, id));
   await db.update(schema.santri).set({ status: 'aktif', updatedAt: now }).where(eq(schema.santri.id, permit.santriId));
   return c.json({ success: true });
@@ -3213,6 +3302,13 @@ app.post('/api/pelanggaran', async (c) => {
   if (user && user.role === 'viewer') return c.json({ error: 'Viewer read-only' }, 403);
   const payload = await c.req.json();
   const db = getDb(c);
+
+  const current = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.santriId)).get();
+  if (!current || current.deletedAt) return c.json({ error: 'Santri tidak ditemukan' }, 404);
+  if (!isSantriInScope(user, current)) {
+    return c.json({ error: 'Akses ditolak: Santri ini di luar cakupan wewenang Anda' }, 403);
+  }
+
   const now = new Date().toISOString();
   const id = 'plg-' + Date.now();
   const poin = Number(payload.poin) || 5;
@@ -3227,10 +3323,7 @@ app.post('/api/pelanggaran', async (c) => {
     statusPenyelesaian: 'proses',
     createdAt: now,
   });
-  const current = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.santriId)).get();
-  if (current) {
-    await db.update(schema.santri).set({ poinPelanggaran: (current.poinPelanggaran || 0) + poin, updatedAt: now }).where(eq(schema.santri.id, payload.santriId));
-  }
+  await db.update(schema.santri).set({ poinPelanggaran: (current.poinPelanggaran || 0) + poin, updatedAt: now }).where(eq(schema.santri.id, payload.santriId));
   return c.json({ success: true, id }, 201);
 });
 
@@ -3310,9 +3403,17 @@ app.delete('/api/staf/penugasan/:id', async (c) => {
 // DOKUMEN DIGITAL (BERKAS SANTRI & STAF)
 // -------------------------------------------------------------
 app.get('/api/dokumen', async (c) => {
+  const user = await getAuthUser(c);
   const db = getDb(c);
   const pemilikTipe = c.req.query('pemilikTipe');
   const pemilikId = c.req.query('pemilikId');
+
+  if (pemilikTipe === 'santri' && pemilikId) {
+    const s = await db.select().from(schema.santri).where(eq(schema.santri.id, pemilikId)).get();
+    if (s && !isSantriInScope(user, s)) {
+      return c.json({ error: 'Akses ditolak: Dokumen santri di luar cakupan wewenang Anda' }, 403);
+    }
+  }
 
   const conds: any[] = [isNull(schema.dokumen.deletedAt)];
   if (pemilikTipe) conds.push(eq(schema.dokumen.pemilikTipe, pemilikTipe));
@@ -3333,6 +3434,14 @@ app.post('/api/dokumen', async (c) => {
   if (!user || user.role === 'viewer') return c.json({ error: 'Akses ditolak' }, 403);
   const payload = await c.req.json();
   const db = getDb(c);
+
+  if (payload.pemilikTipe === 'santri' && payload.pemilikId) {
+    const s = await db.select().from(schema.santri).where(eq(schema.santri.id, payload.pemilikId)).get();
+    if (!s || !isSantriInScope(user, s)) {
+      return c.json({ error: 'Akses ditolak: Santri di luar cakupan wewenang Anda' }, 403);
+    }
+  }
+
   const id = 'doc-' + Date.now();
   const now = new Date().toISOString();
 
@@ -3362,6 +3471,14 @@ app.delete('/api/dokumen/:id', async (c) => {
   const db = getDb(c);
   const now = new Date().toISOString();
 
+  const doc = await db.select().from(schema.dokumen).where(eq(schema.dokumen.id, id)).get();
+  if (doc && doc.pemilikTipe === 'santri' && doc.pemilikId) {
+    const s = await db.select().from(schema.santri).where(eq(schema.santri.id, doc.pemilikId)).get();
+    if (s && !isSantriInScope(user, s)) {
+      return c.json({ error: 'Akses ditolak: Dokumen di luar wewenang Anda' }, 403);
+    }
+  }
+
   await db.update(schema.dokumen).set({ deletedAt: now }).where(eq(schema.dokumen.id, id));
   return c.json({ success: true });
 });
@@ -3371,8 +3488,15 @@ app.delete('/api/dokumen/:id', async (c) => {
 // (Satu santri boleh banyak lembaga dalam satu tahun ajaran)
 // -------------------------------------------------------------
 app.get('/api/santri/:id/keanggotaan', async (c) => {
+  const user = await getAuthUser(c);
   const id = c.req.param('id');
   const db = getDb(c);
+
+  const target = await db.select().from(schema.santri).where(eq(schema.santri.id, id)).get();
+  if (target && !isSantriInScope(user, target)) {
+    return c.json({ error: 'Akses ditolak: Santri di luar cakupan wewenang Anda' }, 403);
+  }
+
   const tahunAjaranId = c.req.query('tahunAjaranId');
 
   const conds: any[] = [
@@ -3415,6 +3539,12 @@ app.post('/api/santri/:id/keanggotaan', async (c) => {
   const santriId = c.req.param('id');
   const payload = await c.req.json();
   const db = getDb(c);
+
+  const target = await db.select().from(schema.santri).where(eq(schema.santri.id, santriId)).get();
+  if (!target || !isSantriInScope(user, target)) {
+    return c.json({ error: 'Akses ditolak: Santri di luar cakupan wewenang Anda' }, 403);
+  }
+
   const id = 'kg-' + Date.now();
   const now = new Date().toISOString();
 

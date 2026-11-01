@@ -245,6 +245,9 @@ export interface UserSession {
   assignedLembagaIds: string[];
   assignedAsramaIds: string[];
   scopeAsrama?: 'putra' | 'putri' | 'semua';
+  stafId?: string | null;
+  stafNama?: string | null;
+  lastLoginAt?: string | null;
   phone?: string | null;
   avatarUrl?: string | null;
   scopeSummary?: string;
@@ -259,10 +262,14 @@ export interface UserItem {
   assignedLembagaIds: string[];
   assignedAsramaIds: string[];
   scopeAsrama?: 'putra' | 'putri' | 'semua';
+  stafId?: string | null;
+  stafNama?: string | null;
+  lastLoginAt?: string | null;
   phone?: string | null;
   isActive: number;
   mustChangePassword?: number | boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface TahfidzRecord {

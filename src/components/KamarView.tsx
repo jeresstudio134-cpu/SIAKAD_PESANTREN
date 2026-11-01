@@ -194,7 +194,11 @@ export const KamarView: React.FC<KamarViewProps> = ({
             {asramas.length}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            {asramas.filter((a) => a.kelompokGender === 'Putra').length} Putra · {asramas.filter((a) => a.kelompokGender === 'Putri').length} Putri
+            {currentUser?.scopeAsrama === 'putra'
+              ? `${asramas.filter((a) => a.kelompokGender === 'Putra').length} Asrama Putra`
+              : currentUser?.scopeAsrama === 'putri'
+              ? `${asramas.filter((a) => a.kelompokGender === 'Putri').length} Asrama Putri`
+              : `${asramas.filter((a) => a.kelompokGender === 'Putra').length} Putra · ${asramas.filter((a) => a.kelompokGender === 'Putri').length} Putri`}
           </div>
         </div>
 

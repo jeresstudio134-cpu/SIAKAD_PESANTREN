@@ -192,11 +192,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <TabIcon className="w-4 h-4" />
             </div>
             <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate leading-tight">
                   {currentTabInfo.title}
                 </h1>
-                <div className="hidden sm:block">
+                <div className="flex items-center">
                   {getRoleBadge()}
                 </div>
               </div>

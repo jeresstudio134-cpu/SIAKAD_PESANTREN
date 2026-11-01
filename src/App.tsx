@@ -188,6 +188,18 @@ export default function App() {
     fetchMasterData();
   }, []);
 
+  // Sync filters and master data on user change
+  React.useEffect(() => {
+    if (currentUser) {
+      fetchMasterData();
+      if (currentUser.scopeAsrama === 'putra') {
+        setFilters((prev) => ({ ...prev, jenisKelamin: 'L', asramaId: 'semua', page: 1 }));
+      } else if (currentUser.scopeAsrama === 'putri') {
+        setFilters((prev) => ({ ...prev, jenisKelamin: 'P', asramaId: 'semua', page: 1 }));
+      }
+    }
+  }, [currentUser?.id, currentUser?.scopeAsrama]);
+
   // Debounced search / filter / academic year update
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -204,7 +216,7 @@ export default function App() {
       jenjang: 'semua',
       kelas: 'semua',
       asramaId: 'semua',
-      jenisKelamin: 'semua',
+      jenisKelamin: currentUser?.scopeAsrama === 'putra' ? 'L' : currentUser?.scopeAsrama === 'putri' ? 'P' : 'semua',
       status: 'semua',
       statusSpp: 'semua',
       minJuz: 0,
@@ -514,6 +526,7 @@ export default function App() {
           onClose={() => setShowLoginModal(false)}
           onLoginSuccess={(user) => {
             setCurrentUser(user);
+            fetchMasterData();
             fetchStats();
             fetchSantri();
           }}

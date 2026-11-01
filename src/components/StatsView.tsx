@@ -15,9 +15,11 @@ export const StatsView: React.FC<StatsViewProps> = ({
 }) => {
   if (!stats) return null;
 
+  const isPutraScoped = stats.scopeAsrama === 'putra';
+  const isPutriScoped = stats.scopeAsrama === 'putri';
   const total = stats.totalSantri || 1;
-  const pctPutra = Math.round((stats.santriPutra / total) * 100);
-  const pctPutri = 100 - pctPutra;
+  const pctPutra = isPutriScoped ? 0 : isPutraScoped ? 100 : Math.round((stats.santriPutra / total) * 100);
+  const pctPutri = isPutraScoped ? 0 : isPutriScoped ? 100 : 100 - pctPutra;
 
   return (
     <div className="space-y-6">
@@ -38,8 +40,12 @@ export const StatsView: React.FC<StatsViewProps> = ({
 
         <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shrink-0">
           <div className="text-center">
-            <span className="text-[10px] text-emerald-200 block">Kapasitas Santri</span>
-            <span className="font-mono text-xl font-bold tabular-nums">2.000</span>
+            <span className="text-[10px] text-emerald-200 block">
+              {isPutraScoped ? 'Santri Putra' : isPutriScoped ? 'Santri Putri' : 'Total Santri'}
+            </span>
+            <span className="font-mono text-xl font-bold tabular-nums">
+              {stats.totalSantri.toLocaleString('id-ID')}
+            </span>
           </div>
           <div className="h-8 w-px bg-white/20" />
           <div className="text-center">
@@ -59,44 +65,58 @@ export const StatsView: React.FC<StatsViewProps> = ({
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-emerald-600" />
-              <span>Komposisi Santri (Putra & Putri)</span>
+              <span>
+                {isPutraScoped
+                  ? 'Cakupan Wewenang (Asrama Putra)'
+                  : isPutriScoped
+                  ? 'Cakupan Wewenang (Asrama Putri)'
+                  : 'Komposisi Santri (Putra & Putri)'}
+              </span>
             </h3>
             <span className="text-xs text-slate-400 font-mono">100% Asrama</span>
           </div>
 
           <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex mb-3">
-            <div
-              style={{ width: `${pctPutra}%` }}
-              className="bg-emerald-600 h-full transition-all"
-              title={`Putra: ${stats.santriPutra} (${pctPutra}%)`}
-            />
-            <div
-              style={{ width: `${pctPutri}%` }}
-              className="bg-teal-400 h-full transition-all"
-              title={`Putri: ${stats.santriPutri} (${pctPutri}%)`}
-            />
+            {!isPutriScoped && (
+              <div
+                style={{ width: `${pctPutra}%` }}
+                className="bg-emerald-600 h-full transition-all"
+                title={`Putra: ${stats.santriPutra} (${pctPutra}%)`}
+              />
+            )}
+            {!isPutraScoped && (
+              <div
+                style={{ width: `${pctPutri}%` }}
+                className="bg-teal-400 h-full transition-all"
+                title={`Putri: ${stats.santriPutri} (${pctPutri}%)`}
+              />
+            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="p-2.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                <span className="font-semibold text-slate-800 dark:text-slate-200">Santri Putra (Banin)</span>
+          <div className={`grid ${isPutraScoped || isPutriScoped ? 'grid-cols-1' : 'grid-cols-2'} gap-3 text-xs`}>
+            {!isPutriScoped && (
+              <div className="p-2.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">Santri Putra (Banin)</span>
+                </div>
+                <p className="font-mono font-bold text-base text-emerald-700 dark:text-emerald-400 mt-1 tabular-nums">
+                  {stats.santriPutra.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-500">({pctPutra}%)</span>
+                </p>
               </div>
-              <p className="font-mono font-bold text-base text-emerald-700 dark:text-emerald-400 mt-1 tabular-nums">
-                {stats.santriPutra.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-500">({pctPutra}%)</span>
-              </p>
-            </div>
+            )}
 
-            <div className="p-2.5 rounded-lg bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/30">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-teal-400" />
-                <span className="font-semibold text-slate-800 dark:text-slate-200">Santri Putri (Banat)</span>
+            {!isPutraScoped && (
+              <div className="p-2.5 rounded-lg bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/30">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-teal-400" />
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">Santri Putri (Banat)</span>
+                </div>
+                <p className="font-mono font-bold text-base text-teal-700 dark:text-teal-400 mt-1 tabular-nums">
+                  {stats.santriPutri.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-500">({pctPutri}%)</span>
+                </p>
               </div>
-              <p className="font-mono font-bold text-base text-teal-700 dark:text-teal-400 mt-1 tabular-nums">
-                {stats.santriPutri.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-500">({pctPutri}%)</span>
-              </p>
-            </div>
+            )}
           </div>
         </div>
 

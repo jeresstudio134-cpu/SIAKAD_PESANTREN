@@ -32,9 +32,9 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
   const isPutri = stats.scopeAsrama === 'putri';
 
   const totalSantriSubtitle = isPutra
-    ? `${stats.totalSantri.toLocaleString('id-ID')} Santri Putra (Banin)`
+    ? `${stats.totalSantri.toLocaleString('id-ID')} Putra`
     : isPutri
-    ? `${stats.totalSantri.toLocaleString('id-ID')} Santri Putri (Banat)`
+    ? `${stats.totalSantri.toLocaleString('id-ID')} Putri`
     : `${stats.santriPutra.toLocaleString('id-ID')} Putra · ${stats.santriPutri.toLocaleString('id-ID')} Putri`;
 
   const stafSubtitle = isPutra

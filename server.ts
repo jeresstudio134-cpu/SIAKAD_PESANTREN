@@ -47,6 +47,10 @@ async function startServer() {
   safeAddCol('users', 'deleted_at', 'TEXT');
   safeAddCol('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
   safeAddCol('users', 'scope_asrama', "TEXT NOT NULL DEFAULT 'semua'");
+  safeAddCol('users', 'staf_id', 'TEXT');
+  safeAddCol('users', 'last_login_at', 'TEXT');
+  safeAddCol('users', 'failed_login_count', 'INTEGER NOT NULL DEFAULT 0');
+  safeAddCol('users', 'locked_until', 'TEXT');
   try {
     sqliteDb.exec("UPDATE users SET scope_asrama = 'putra' WHERE username LIKE '%putra%' OR id = 'usr-5';");
     sqliteDb.exec("UPDATE users SET scope_asrama = 'putri' WHERE username LIKE '%putri%' OR id = 'usr-6';");

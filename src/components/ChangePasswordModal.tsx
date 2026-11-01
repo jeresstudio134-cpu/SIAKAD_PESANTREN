@@ -13,7 +13,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   onSuccess,
   onLogout,
 }) => {
-  const [currentPassword, setCurrentPassword] = useState('adminpesantren123');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showCurrent, setShowCurrent] = useState(false);
@@ -26,11 +26,17 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   const hasMinLength = newPassword.length >= 8;
   const hasMixedChars = /[a-zA-Z]/.test(newPassword) && /[0-9]/.test(newPassword);
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
-  const isFormValid = hasMinLength && hasMixedChars && passwordsMatch;
+  const isDifferentFromOld = currentPassword.length > 0 && newPassword.length > 0 && newPassword !== currentPassword;
+  const isFormValid = hasMinLength && hasMixedChars && passwordsMatch && isDifferentFromOld;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isFormValid) return;
+    if (!isFormValid) {
+      if (!isDifferentFromOld && currentPassword && newPassword) {
+        setErrorMsg('Kata sandi baru tidak boleh sama dengan kata sandi lama');
+      }
+      return;
+    }
 
     try {
       setLoading(true);
@@ -76,7 +82,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
           <div>
             <h3 className="font-bold text-lg leading-tight">Wajib Ganti Kata Sandi Awal</h3>
             <p className="text-xs text-amber-100 mt-0.5">
-              Sebagai kebijakan keamanan, akun Super Admin awal harus mengganti password sebelum melanjutkan.
+              Sebagai kebijakan keamanan, akun pengguna baru wajib mengganti password sebelum melanjutkan.
             </p>
           </div>
         </div>
@@ -106,14 +112,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-500">
-              Kata sandi default sistem adalah <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200">adminpesantren123</code>. Mohon ganti dengan kata sandi pribadi yang aman.
+              Gunakan kata sandi awal dari administrator. Demi keamanan akun, mohon segera ganti dengan kata sandi pribadi Anda.
             </p>
           </div>
 
           {/* Current Password Field */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Kata Sandi Saat Ini / Default
+              Kata Sandi Saat Ini / Awal
             </label>
             <div className="relative">
               <input
@@ -137,7 +143,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
           {/* New Password Field */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Kata Sandi Baru (Min. 8 Karakter & Kombinasi Angka)
+              Kata Sandi Baru (Min. 8 Karakter & Kombinasi Huruf dan Angka)
             </label>
             <div className="relative">
               <input
@@ -191,6 +197,12 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               <CheckCircle className={`w-3.5 h-3.5 ${passwordsMatch ? 'text-emerald-600' : 'text-slate-300 dark:text-slate-600'}`} />
               <span className={passwordsMatch ? 'text-emerald-700 dark:text-emerald-400 font-medium' : ''}>
                 Konfirmasi kata sandi cocok
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle className={`w-3.5 h-3.5 ${isDifferentFromOld ? 'text-emerald-600' : 'text-slate-300 dark:text-slate-600'}`} />
+              <span className={isDifferentFromOld ? 'text-emerald-700 dark:text-emerald-400 font-medium' : ''}>
+                Tidak boleh sama dengan kata sandi lama
               </span>
             </div>
           </div>
